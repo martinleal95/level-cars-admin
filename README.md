@@ -38,3 +38,8 @@ Hecho con Next.js 16, Tailwind CSS 4 y Supabase (Postgres con seguridad por fila
 - `npm run test:db`: pruebas de seguridad y de reglas de negocio contra un Postgres **local** descartable.
 - `tests/e2e/recorrido.mjs`: recorrido completo en un navegador real (escritorio y celular). Las credenciales se pasan por variables de entorno; ver el encabezado del archivo.
 - En GitHub, cada cambio corre auditoría de dependencias, tipos, lint, compilación, búsqueda de claves filtradas y las pruebas de base de datos.
+
+## Publicación
+
+La app se publica en Vercel con cada cambio en `main`. En el proyecto de Vercel solo se cargan
+las dos variables públicas de `.env.example` (URL y clave publicable). Nunca se carga la clave secreta.
