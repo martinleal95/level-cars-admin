@@ -1,26 +1,102 @@
 @import "tailwindcss";
 
+/* ============================================================
+   Identidad Level Cars
+   Grafito #16181C · Acero #E7E7E8 · Naranja #F0530F
+   ============================================================ */
+@theme {
+  --color-grafito-950: #0d0e11;
+  --color-grafito-900: #16181c;
+  --color-grafito-800: #1f2228;
+  --color-grafito-700: #2b2f37;
+  --color-grafito-600: #3c414b;
+  --color-acero-50: #f6f6f7;
+  --color-acero-100: #efeff0;
+  --color-acero-200: #e7e7e8;
+  --color-acero-300: #d4d5d8;
+  --color-acero-400: #a3a6ad;
+  --color-acero-500: #73777f;
+  --color-naranja-50: #fff3ed;
+  --color-naranja-100: #ffe3d4;
+  --color-naranja-400: #ff7a3d;
+  --color-naranja-500: #f0530f;
+  --color-naranja-600: #d6430a;
+  --color-naranja-700: #b2360b;
+
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  --font-display: var(--font-montserrat), var(--font-inter), ui-sans-serif, sans-serif;
+
+  --radius-xl: 0.875rem;
+  --shadow-tarjeta: 0 1px 2px rgb(22 24 28 / 0.06), 0 4px 16px rgb(22 24 28 / 0.06);
+}
+
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  color-scheme: light;
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+html {
+  -webkit-text-size-adjust: 100%;
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background: var(--color-acero-50);
+  color: var(--color-grafito-900);
+  font-family: var(--font-sans);
+}
+
+h1, h2, h3 {
+  font-family: var(--font-display);
+  letter-spacing: -0.01em;
+}
+
+/* Foco visible y accesible en toda la app */
+:focus-visible {
+  outline: 3px solid var(--color-naranja-400);
+  outline-offset: 2px;
+}
+
+/* ---------- Componentes base (utilidades propias de Tailwind v4) ---------- */
+@utility tarjeta {
+  @apply rounded-xl bg-white shadow-tarjeta ring-1 ring-grafito-900/5;
+}
+@utility etiqueta {
+  @apply mb-1.5 block text-sm font-semibold text-grafito-700;
+}
+@utility campo {
+  @apply block w-full rounded-lg border border-acero-300 bg-white px-3.5 py-2.5 text-base text-grafito-900
+    placeholder:text-acero-400 transition
+    focus:border-naranja-500 focus:outline-none focus:ring-4 focus:ring-naranja-500/15
+    disabled:bg-acero-100 disabled:text-acero-500;
+}
+@utility ayuda {
+  @apply mt-1 text-xs text-acero-500;
+}
+@utility btn {
+  @apply inline-flex min-h-11 items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-semibold
+    transition select-none active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50;
+}
+/* Acción principal: crear, guardar, confirmar */
+@utility btn-primario { @apply btn bg-naranja-500 text-white shadow-sm hover:bg-naranja-600; }
+/* Acción positiva de dinero: cobrar, marcar pagado */
+@utility btn-exito { @apply btn bg-emerald-600 text-white shadow-sm hover:bg-emerald-700; }
+/* Acción destructiva: anular, retirar, borrar */
+@utility btn-peligro { @apply btn bg-red-600 text-white shadow-sm hover:bg-red-700; }
+/* Reserva / atención */
+@utility btn-aviso { @apply btn bg-amber-500 text-grafito-900 shadow-sm hover:bg-amber-400; }
+/* Secundaria: volver, cancelar, filtrar */
+@utility btn-secundario { @apply btn bg-white text-grafito-800 ring-1 ring-acero-300 hover:bg-acero-100; }
+@utility btn-fantasma { @apply btn text-grafito-700 hover:bg-acero-100; }
+@utility insignia {
+  @apply inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-semibold whitespace-nowrap;
+}
+@utility tabla {
+  @apply w-full text-left text-sm;
+  & th { @apply border-b border-acero-200 px-4 py-3 text-xs font-semibold tracking-wide text-acero-500 uppercase; }
+  & td { @apply border-b border-acero-100 px-4 py-3 align-middle; }
+  & tbody tr:hover { @apply bg-acero-50; }
+}
+
+/* Números alineados en importes */
+.cifra {
+  font-variant-numeric: tabular-nums;
 }

@@ -1,36 +1,40 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Level Cars · Administración
 
-## Getting Started
+Sistema interno de Level Cars para registrar stock, ventas, señas, caja y reportes.
+Hecho con Next.js 16, Tailwind CSS 4 y Supabase (Postgres con seguridad por filas).
 
-First, run the development server:
+## Qué hace
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
-```
+- **Stock**: autos, motos y teléfonos propios, en consignación o de otras agencias (intermediación). Fotos, gastos por bien, alertas de antigüedad y de vencimiento de consignación.
+- **Ventas** con pagos combinados: efectivo, transferencia, financiación (con o sin comisión de la financiera) y vehículos o bienes que entran como parte de pago y pasan al stock.
+- **Señas y reservas**: se descuentan al vender, o se retienen o devuelven (total o parcial) si la venta no se hace.
+- **Comisiones** a vendedores y referidos (monto fijo, % del precio o % de la ganancia), editables en cada operación.
+- **Caja** en pesos y dólares, efectivo y banco, con motivos, pendientes y gastos fijos.
+- **Reportes**: resultado mensual, ventas por canal de entrada, por tipo de bien, por vendedor y por forma de pago.
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## Puesta en marcha
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+1. Crear un proyecto en Supabase y aplicar, en orden, las migraciones de `supabase/migrations/`.
+2. Copiar `.env.example` como `.env.local` y completar la URL y la clave **publicable** del proyecto.
+3. En Supabase > Authentication: crear el usuario administrador y **desactivar los registros públicos**.
+4. Darle acceso de administrador (SQL Editor):
+   ```sql
+   insert into public.administradores (user_id, nombre)
+   select id, 'Tu nombre' from auth.users where email = 'tu@email.com';
+   ```
+5. `npm install` y `npm run dev`.
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Seguridad
 
-## Learn More
+- Nunca se sube ninguna clave: `.env*` está ignorado salvo `.env.example`. La app rechaza la clave secreta (`service_role`) si alguien la configura por error.
+- Toda la seguridad de los datos vive en la base: RLS forzado en todas las tablas, solo los administradores activos ven o modifican algo, y las operaciones de dinero pasan por funciones que validan cada regla. Cada cambio queda en la tabla de auditoría.
+- Cada página y cada acción del servidor vuelve a verificar que el usuario sea administrador.
+- Encabezados de seguridad estrictos (CSP con nonce, HSTS, sin iframes) y validación de todos los datos con zod.
+- Fotos en un bucket privado, con URLs firmadas que vencen en una hora y control del tipo real del archivo.
 
-To learn more about Next.js, take a look at the following resources:
+## Pruebas
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- `npm run lint` y `npx tsc --noEmit`.
+- `npm run test:db`: pruebas de seguridad y de reglas de negocio contra un Postgres **local** descartable.
+- `tests/e2e/recorrido.mjs`: recorrido completo en un navegador real (escritorio y celular). Las credenciales se pasan por variables de entorno; ver el encabezado del archivo.
+- En GitHub, cada cambio corre auditoría de dependencias, tipos, lint, compilación, búsqueda de claves filtradas y las pruebas de base de datos.
