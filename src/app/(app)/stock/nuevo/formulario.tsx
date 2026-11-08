@@ -4,6 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { Building2, Handshake, Repeat, Save } from "lucide-react";
 import { Formulario, BotonEnviar } from "@/components/formulario";
+import { SelectorFotos } from "@/components/selector-fotos";
 import { Campo } from "@/components/ui";
 import { crearBien } from "../acciones";
 
@@ -136,6 +137,12 @@ export function FormularioBien({ personas, hoy }: { personas: Persona[]; hoy: st
           </Campo>
         </section>
       )}
+
+      <section className="tarjeta p-4 sm:p-6">
+        <h2 className="mb-1 text-lg font-bold">Fotos</h2>
+        <p className="ayuda mb-3 mt-0">Opcional. Hasta 8 ahora; después podés agregar más desde la ficha del bien.</p>
+        <SelectorFotos />
+      </section>
 
       <section className="tarjeta p-4 sm:p-6">
         <Campo etiqueta="Notas" htmlFor="notas">

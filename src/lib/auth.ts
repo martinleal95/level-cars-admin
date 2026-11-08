@@ -10,16 +10,17 @@ import { crearClienteServidor } from "@/lib/supabase/server";
  */
 export const requerirAdmin = cache(async () => {
   const supabase = await crearClienteServidor();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  // Token verificado por firma (rápido). Igual la base revisa en cada consulta,
+  // con RLS, que el usuario figure como administrador activo.
+  const { data } = await supabase.auth.getClaims();
+  const userId = data?.claims?.sub;
 
-  if (!user) redirect("/login");
+  if (!userId) redirect("/login");
 
   const { data: admin } = await supabase
     .from("administradores")
     .select("nombre, activo")
-    .eq("user_id", user.id)
+    .eq("user_id", userId)
     .maybeSingle();
 
   if (!admin?.activo) {
@@ -27,5 +28,5 @@ export const requerirAdmin = cache(async () => {
     redirect("/login?error=sin-acceso");
   }
 
-  return { supabase, user, nombre: admin.nombre as string };
+  return { supabase, userId, nombre: admin.nombre as string };
 });

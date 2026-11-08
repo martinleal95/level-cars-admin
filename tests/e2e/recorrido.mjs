@@ -2,6 +2,7 @@
 // Uso: E2E_URL=http://localhost:3000 E2E_EMAIL=... E2E_PASSWORD=... node tests/e2e/recorrido.mjs
 // Las credenciales se pasan por variables de entorno: nunca se escriben en el código.
 import { createRequire } from "node:module";
+import { deflateSync } from "node:zlib";
 // playwright puede estar instalado global (NODE_PATH) o como dependencia local
 const { chromium } = createRequire(import.meta.url)("playwright");
 
@@ -17,6 +18,23 @@ if (!EMAIL || !PASSWORD) throw new Error("Faltan E2E_EMAIL / E2E_PASSWORD");
 const sufijo = Date.now().toString().slice(-6);
 const errores = [];
 let paso = 0;
+
+/** PNG de prueba (degradé de 800x600) generado en memoria. */
+function pngPrueba() {
+  const ancho = 800, alto = 600;
+  const crc = (b) => { let c = ~0; for (const x of b) { c ^= x; for (let k = 0; k < 8; k++) c = (c >>> 1) ^ (0xedb88320 & -(c & 1)); } return ~c >>> 0; };
+  const bloque = (tipo, datos) => {
+    const t = Buffer.from(tipo), l = Buffer.alloc(4), c = Buffer.alloc(4);
+    l.writeUInt32BE(datos.length); c.writeUInt32BE(crc(Buffer.concat([t, datos])));
+    return Buffer.concat([l, t, datos, c]);
+  };
+  const ihdr = Buffer.alloc(13); ihdr.writeUInt32BE(ancho, 0); ihdr.writeUInt32BE(alto, 4); ihdr[8] = 8; ihdr[9] = 2;
+  const filas = Buffer.alloc((ancho * 3 + 1) * alto);
+  for (let y = 0; y < alto; y++) for (let x = 0; x < ancho; x++) {
+    const i = y * (ancho * 3 + 1) + 1 + x * 3; filas[i] = 240; filas[i + 1] = (x * 7 + y * 3) % 256; filas[i + 2] = (x ^ y) % 256;
+  }
+  return Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), bloque("IHDR", ihdr), bloque("IDAT", deflateSync(filas)), bloque("IEND", Buffer.alloc(0))]);
+}
 
 function ok(msg) { console.log(`  ✓ ${msg}`); }
 async function captura(page, nombre) {
@@ -99,12 +117,19 @@ for (const dispositivo of ["escritorio", "celular"]) {
     await page.fill("#costo", "7.000.000");
     await page.fill("#precio_publicado", "10.000.000");
     await page.check("input[name=registrar_egreso]");
+    await page.setInputFiles("input[name=fotos]", [
+      { name: "frente.png", mimeType: "image/png", buffer: pngPrueba() },
+      { name: "lateral.png", mimeType: "image/png", buffer: pngPrueba() },
+    ]);
+    await page.getByText("2 fotos listas").waitFor();
     await captura(page, "nuevo-bien");
     await page.getByRole("button", { name: "Guardar bien" }).click();
     await page.waitForURL(/\/stock\/\d+$/);
     const bienId = page.url().split("/").pop();
     await page.getByText(`Focus E2E ${sufijo}`).first().waitFor();
-    ok(`bien creado (#${bienId})`);
+    if (page.url().includes("fotos=error")) throw new Error("Las fotos del bien nuevo no se subieron");
+    await page.locator("img[alt^='Foto de Ford']").nth(1).waitFor();
+    ok(`bien creado con 2 fotos (#${bienId})`);
 
     // 6. Cargar un gasto al bien
     await page.selectOption("#g_motivo", { label: "Arreglos y mecánica" });

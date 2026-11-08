@@ -12,8 +12,11 @@ import {
 
 export const metadata: Metadata = { title: "Detalle del bien" };
 
-export default async function PaginaBien({ params }: { params: Promise<{ id: string }> }) {
+export default async function PaginaBien({ params, searchParams }: {
+  params: Promise<{ id: string }>; searchParams: Promise<{ fotos?: string }>;
+}) {
   const { id: idTexto } = await params;
+  const { fotos: avisoFotos } = await searchParams;
   const bienId = Number(idTexto);
   if (!Number.isSafeInteger(bienId) || bienId <= 0) notFound();
 
@@ -91,7 +94,12 @@ export default async function PaginaBien({ params }: { params: Promise<{ id: str
             {bien.notas && <p className="mt-4 whitespace-pre-line rounded-lg bg-acero-50 p-3 text-sm text-grafito-700">{bien.notas}</p>}
           </Seccion>
 
-          <Seccion titulo="Fotos" accion={activo ? <SubirFoto bienId={bien.id} /> : undefined}>
+          <Seccion titulo="Fotos" accion={fotosDb?.length ? <span className="text-sm font-semibold text-acero-500">{fotosDb.length}</span> : undefined}>
+            {avisoFotos === "error" && (
+              <p role="alert" className="mb-4 rounded-lg bg-amber-50 px-3 py-2.5 text-sm font-semibold text-amber-800">
+                El bien se guardó, pero alguna foto no se pudo subir. Probá de nuevo desde acá.
+              </p>
+            )}
             {fotosDb?.length ? (
               <ul className="grid grid-cols-2 gap-3 sm:grid-cols-3">
                 {fotosDb.map((f) => (
@@ -103,8 +111,9 @@ export default async function PaginaBien({ params }: { params: Promise<{ id: str
                 ))}
               </ul>
             ) : (
-              <p className="text-sm text-acero-500">Todavía no hay fotos. Podés sacarlas desde el celular.</p>
+              <p className="text-sm text-acero-500">Todavía no hay fotos. Podés sacarlas con el celular o elegirlas de la galería.</p>
             )}
+            {activo && <div className="mt-4 border-t border-acero-100 pt-4"><SubirFoto bienId={bien.id} /></div>}
           </Seccion>
 
           <Seccion titulo="Gastos del bien">

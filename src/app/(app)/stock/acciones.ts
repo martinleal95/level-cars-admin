@@ -58,8 +58,13 @@ export async function crearBien(_: Resultado | null, fd: FormData): Promise<Resu
   const { data, error } = await supabase.rpc("crear_bien", { p: d.data });
   if (error) return { ok: false, error: mensajeError(error) };
 
+  // Las fotos van después de crear el bien; si alguna falla, el bien igual queda
+  // creado y se avisa en su ficha para reintentar desde ahí.
+  const archivos = fd.getAll("fotos").filter((a): a is File => a instanceof File && a.size > 0);
+  const fotos = archivos.length ? await guardarFotos(supabase, Number(data), archivos) : null;
+
   revalidatePath("/stock");
-  redirect(`/stock/${data}`);
+  redirect(`/stock/${data}${fotos?.error ? "?fotos=error" : ""}`);
 }
 
 const esquemaEditar = z.object({
@@ -211,37 +216,62 @@ function firmaValida(bytes: Uint8Array, tipo: string) {
   return false;
 }
 
+type Cliente = Awaited<ReturnType<typeof requerirAdmin>>["supabase"];
+const MAX_FOTOS_POR_BIEN = 20;
+const MAX_FOTOS_POR_ENVIO = 8;
+
+/**
+ * Valida y guarda las fotos de un bien. Devuelve cuántas se guardaron y,
+ * si alguna falló, el motivo de la primera falla.
+ */
+async function guardarFotos(supabase: Cliente, bienId: number, archivos: File[]) {
+  const validos = archivos.filter((a) => a instanceof File && a.size > 0);
+  if (validos.length > MAX_FOTOS_POR_ENVIO) {
+    return { guardadas: 0, error: `Subí hasta ${MAX_FOTOS_POR_ENVIO} fotos por vez.` };
+  }
+  const { count } = await supabase.from("bien_fotos").select("id", { count: "exact", head: true }).eq("bien_id", bienId);
+  let orden = count ?? 0;
+  let guardadas = 0;
+  let error: string | undefined;
+
+  for (const archivo of validos) {
+    if (orden >= MAX_FOTOS_POR_BIEN) { error ??= `Máximo ${MAX_FOTOS_POR_BIEN} fotos por bien.`; break; }
+    if (archivo.size > MAX_FOTO) { error ??= "Alguna foto supera los 5 MB."; continue; }
+    const ext = TIPOS_FOTO[archivo.type];
+    if (!ext) { error ??= "Formato no permitido. Usá JPG, PNG o WEBP."; continue; }
+    const bytes = new Uint8Array(await archivo.arrayBuffer());
+    if (!firmaValida(bytes, archivo.type)) { error ??= "Algún archivo no es una imagen válida."; continue; }
+
+    // Nombre generado por el servidor: nunca se usa el nombre del archivo original.
+    const ruta = `${bienId}/${crypto.randomUUID()}.${ext}`;
+    const { error: errSubida } = await supabase.storage
+      .from("fotos-bienes")
+      .upload(ruta, bytes, { contentType: archivo.type, upsert: false });
+    if (errSubida) { error ??= "No se pudo subir alguna foto."; continue; }
+
+    const { error: errFila } = await supabase.from("bien_fotos").insert({ bien_id: bienId, ruta, orden });
+    if (errFila) {
+      await supabase.storage.from("fotos-bienes").remove([ruta]);
+      error ??= mensajeError(errFila);
+      continue;
+    }
+    orden++;
+    guardadas++;
+  }
+  return { guardadas, error };
+}
+
 export async function subirFoto(_: Resultado | null, fd: FormData): Promise<Resultado> {
   const { supabase } = await requerirAdmin();
   const bienId = id.safeParse(fd.get("bien_id"));
-  const archivo = fd.get("foto");
   if (!bienId.success) return { ok: false, error: "Bien inválido." };
-  if (!(archivo instanceof File) || archivo.size === 0) return { ok: false, error: "Elegí una foto." };
-  if (archivo.size > MAX_FOTO) return { ok: false, error: "La foto supera los 5 MB." };
-  const ext = TIPOS_FOTO[archivo.type];
-  if (!ext) return { ok: false, error: "Formato no permitido. Usá JPG, PNG o WEBP." };
+  const archivos = fd.getAll("fotos").filter((a): a is File => a instanceof File && a.size > 0);
+  if (archivos.length === 0) return { ok: false, error: "Elegí al menos una foto." };
 
-  const bytes = new Uint8Array(await archivo.arrayBuffer());
-  if (!firmaValida(bytes, archivo.type)) return { ok: false, error: "El archivo no es una imagen válida." };
-
-  const { count } = await supabase.from("bien_fotos").select("id", { count: "exact", head: true }).eq("bien_id", bienId.data);
-  if ((count ?? 0) >= 20) return { ok: false, error: "Máximo 20 fotos por bien." };
-
-  // Nombre generado por el servidor: nunca se usa el nombre del archivo original.
-  const ruta = `${bienId.data}/${crypto.randomUUID()}.${ext}`;
-  const { error: errSubida } = await supabase.storage
-    .from("fotos-bienes")
-    .upload(ruta, bytes, { contentType: archivo.type, upsert: false });
-  if (errSubida) return { ok: false, error: "No se pudo subir la foto." };
-
-  const { error } = await supabase.from("bien_fotos").insert({ bien_id: bienId.data, ruta, orden: count ?? 0 });
-  if (error) {
-    await supabase.storage.from("fotos-bienes").remove([ruta]);
-    return { ok: false, error: mensajeError(error) };
-  }
-
-  revalidatePath(`/stock/${bienId.data}`);
-  return { ok: true, mensaje: "Foto agregada." };
+  const { guardadas, error } = await guardarFotos(supabase, bienId.data, archivos);
+  if (guardadas > 0) revalidatePath(`/stock/${bienId.data}`);
+  if (error) return { ok: false, error: guardadas ? `Se subieron ${guardadas}. ${error}` : error };
+  return { ok: true, mensaje: guardadas === 1 ? "Foto agregada." : `${guardadas} fotos agregadas.` };
 }
 
 export async function borrarFoto(_: Resultado | null, fd: FormData): Promise<Resultado> {

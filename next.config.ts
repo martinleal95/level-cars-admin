@@ -18,7 +18,7 @@ const nextConfig: NextConfig = {
   experimental: {
     serverActions: {
       // fotos de hasta 5 MB + margen del formulario
-      bodySizeLimit: "6mb",
+      bodySizeLimit: "4mb", // Vercel corta los pedidos de más de 4,5 MB; las fotos se achican antes en el navegador,
     },
   },
   async headers() {

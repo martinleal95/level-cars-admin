@@ -43,3 +43,6 @@ Hecho con Next.js 16, Tailwind CSS 4 y Supabase (Postgres con seguridad por fila
 
 La app se publica en Vercel con cada cambio en `main`. En el proyecto de Vercel solo se cargan
 las dos variables públicas de `.env.example` (URL y clave publicable). Nunca se carga la clave secreta.
+
+Las funciones de Vercel corren en San Pablo (`gru1`, ver `vercel.json`), la misma región que la base de
+Supabase (`sa-east-1`): cada consulta viaja unos pocos milisegundos en lugar de cruzar a Estados Unidos.

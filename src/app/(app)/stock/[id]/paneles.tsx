@@ -1,9 +1,10 @@
 "use client";
 
 import { useRef } from "react";
-import { CalendarClock, Camera, Trash2, Undo2, Ban, Save, Receipt } from "lucide-react";
+import { CalendarClock, Trash2, Undo2, Ban, Save, Receipt, Upload } from "lucide-react";
 import { Formulario, BotonEnviar, Dialogo } from "@/components/formulario";
 import { Campo } from "@/components/ui";
+import { SelectorFotos } from "@/components/selector-fotos";
 import {
   reservarBien, cerrarReserva, retirarBien, subirFoto, borrarFoto, cargarGasto, editarBien, editarAcuerdo,
 } from "../acciones";
@@ -104,13 +105,10 @@ export function BotonRetirar({ bienId, tercero }: { bienId: number; tercero: boo
 
 export function SubirFoto({ bienId }: { bienId: number }) {
   return (
-    <Formulario accion={subirFoto} limpiar className="flex flex-wrap items-center gap-2">
+    <Formulario accion={subirFoto} limpiar className="space-y-3">
       <input type="hidden" name="bien_id" value={bienId} />
-      <label className="btn-secundario cursor-pointer">
-        <Camera className="size-5" aria-hidden /> Elegir foto
-        <input type="file" name="foto" accept="image/jpeg,image/png,image/webp" capture="environment" required className="sr-only" />
-      </label>
-      <BotonEnviar>Subir</BotonEnviar>
+      <SelectorFotos compacto />
+      <BotonEnviar><Upload className="size-5" aria-hidden /> Subir fotos</BotonEnviar>
     </Formulario>
   );
 }
