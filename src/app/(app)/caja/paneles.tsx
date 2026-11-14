@@ -5,7 +5,7 @@ import { ArrowDownCircle, ArrowUpCircle, Check, Trash2, Pencil } from "lucide-re
 import { Formulario, BotonEnviar, Dialogo } from "@/components/formulario";
 import { EntradaImporte } from "@/components/entradas";
 import { Campo } from "@/components/ui";
-import { registrarMovimiento, marcarPagado, borrarMovimiento, editarMovimiento } from "./acciones";
+import { registrarMovimiento, marcarPagado, borrarMovimiento, editarMovimiento, cambiarMedio } from "./acciones";
 
 type Motivo = { id: number; nombre: string; tipo: "ingreso" | "egreso"; es_gasto_fijo: boolean; activo: boolean };
 type Persona = { id: number; nombre: string };
@@ -78,14 +78,41 @@ export function BotonEditar({ mov, ...props }: { mov: MovimientoEditable; motivo
   );
 }
 
-export function BotonPagado({ id, tipo }: { id: number; tipo: "ingreso" | "egreso" }) {
+export function BotonPagado({ id, tipo, medio }: { id: number; tipo: "ingreso" | "egreso"; medio: string }) {
+  const verbo = tipo === "egreso" ? "Pagado" : "Cobrado";
   return (
-    <Formulario accion={marcarPagado}>
-      <input type="hidden" name="movimiento_id" value={id} />
-      <BotonEnviar variante="exito" className="min-h-9 px-3 py-1.5">
-        <Check className="size-4" aria-hidden /> {tipo === "egreso" ? "Pagado" : "Cobrado"}
-      </BotonEnviar>
-    </Formulario>
+    <Dialogo boton={verbo} titulo={tipo === "egreso" ? "Marcar como pagado" : "Marcar como cobrado"} variante="exito" icono={<Check className="size-4" aria-hidden />}>
+      {(cerrar) => (
+        <Formulario accion={marcarPagado} alGuardar={cerrar} className="space-y-4">
+          <input type="hidden" name="movimiento_id" value={id} />
+          <Campo etiqueta={tipo === "egreso" ? "¿De dónde salió la plata?" : "¿Dónde entró la plata?"} htmlFor={`pg_${id}`}
+            ayuda="Así la caja y el banco quedan bien.">
+            <select id={`pg_${id}`} name="medio" className="campo" defaultValue={medio}>
+              <option value="efectivo">Efectivo</option><option value="banco">Banco / transferencia</option>
+            </select>
+          </Campo>
+          <BotonEnviar variante="exito" className="w-full">Confirmar {verbo.toLowerCase()}</BotonEnviar>
+        </Formulario>
+      )}
+    </Dialogo>
+  );
+}
+
+export function BotonCambiarMedio({ id, medio }: { id: number; medio: string }) {
+  return (
+    <Dialogo boton="Cambiar medio" titulo="¿Fue en efectivo o por banco?" variante="secundario">
+      {(cerrar) => (
+        <Formulario accion={cambiarMedio} alGuardar={cerrar} className="space-y-4">
+          <input type="hidden" name="movimiento_id" value={id} />
+          <Campo etiqueta="Medio" htmlFor={`cm_${id}`} ayuda="Cambia solo de qué saldo se descuenta (efectivo o banco), no el monto.">
+            <select id={`cm_${id}`} name="medio" className="campo" defaultValue={medio}>
+              <option value="efectivo">Efectivo</option><option value="banco">Banco / transferencia</option>
+            </select>
+          </Campo>
+          <BotonEnviar className="w-full">Guardar</BotonEnviar>
+        </Formulario>
+      )}
+    </Dialogo>
   );
 }
 

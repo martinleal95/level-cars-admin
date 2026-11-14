@@ -332,6 +332,26 @@ select pg_temp.esperar_error($q$insert into public.movimientos (tipo, motivo_id,
 select pg_temp.esperar_error(format($q$update public.movimientos set motivo_id = (select id from public.motivos_caja where codigo='comision_pagada') where id = %s$q$, :mman), 'lo usa el sistema');
 select pg_temp.esperar_error(format($q$update public.movimientos set bien_id = %s where id = %s$q$, :fz, :mman), 'permission denied');
 
+-- ================= 7. Caja: el medio se elige al pagar (migración 0013) =================
+select public.crear_bien(jsonb_build_object('tipo','auto','marca','Toyota','modelo','Etios','origen','consignacion',
+  'dueno_id',(select id from public.personas where nombre='Dueño Consig'),'monto_acordado',17000,'moneda','USD')) as etios \gset
+select public.registrar_operacion(jsonb_build_object(
+  'bien_id', :etios, 'cliente_id', :cli1, 'precio_venta', 20000, 'moneda', 'USD',
+  'pagos', jsonb_build_array(jsonb_build_object('tipo','transferencia','monto',20000)),
+  'comisiones', jsonb_build_array(jsonb_build_object('sentido','pagada','persona_id',(select id from public.personas where nombre='Vendedor'),'base','fijo','valor',1000)))) as op_etios \gset
+select m.id as pago_dueno from public.movimientos m join public.motivos_caja mc on mc.id = m.motivo_id
+ where m.operacion_id = :op_etios and mc.codigo = 'pago_tercero' \gset
+select pg_temp.esperar_error(format('select public.resolver_movimiento(%s, null)', :pago_dueno), 'efectivo o por banco');
+select public.resolver_movimiento(:pago_dueno, 'banco');
+select pg_temp.check((select not pendiente and medio = 'banco' from public.movimientos where id = :pago_dueno), 'pago al dueño resuelto por banco');
+select pg_temp.esperar_error(format('select public.resolver_movimiento(%s, %L)', :pago_dueno, 'efectivo'), 'ya estaba resuelto');
+select m.id as com_etios from public.movimientos m join public.motivos_caja mc on mc.id = m.motivo_id
+ where m.operacion_id = :op_etios and mc.codigo = 'comision_pagada' \gset
+select public.resolver_movimiento(:com_etios, 'efectivo');
+select public.cambiar_medio_movimiento(:com_etios, 'banco');
+select pg_temp.check((select medio = 'banco' from public.movimientos where id = :com_etios), 'medio corregido');
+select pg_temp.esperar_error(format($q$select public.cambiar_medio_movimiento((select id from public.movimientos where operacion_id = %s and monto = 20000), 'efectivo')$q$, :op_etios), 'no se cambia');
+
 -- Auditoría registrada
 select pg_temp.check((select count(*) from public.auditoria) > 20, 'auditoría registrada');
 

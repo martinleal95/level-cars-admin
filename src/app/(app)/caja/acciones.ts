@@ -57,26 +57,32 @@ export async function editarMovimiento(_: Resultado | null, fd: FormData): Promi
   return { ok: true, mensaje: `Movimiento actualizado.${await avisoVenta(supabase, data[0].bien_id)}` };
 }
 
+const medio = z.enum(["efectivo", "banco"], { message: "Elegí si fue en efectivo o por banco" });
+
+/** Marca como pagado o cobrado un pendiente, con el medio real (efectivo o banco). */
 export async function marcarPagado(_: Resultado | null, fd: FormData): Promise<Resultado> {
   const { supabase } = await requerirAdmin();
-  const movId = id.safeParse(fd.get("movimiento_id"));
-  if (!movId.success) return { ok: false, error: "Movimiento inválido." };
+  const d = z.object({ movimiento_id: id, medio }).safeParse(datosFormulario(fd));
+  if (!d.success) return { ok: false, error: erroresZod(d.error) };
 
-  // Las financiaciones se marcan desde la operación, para mantener todo sincronizado.
-  const { data: mov } = await supabase.from("movimientos")
-    .select("id, operacion_id, motivo:motivos_caja(codigo)").eq("id", movId.data).single();
-  if ((mov?.motivo as unknown as { codigo: string | null } | null)?.codigo === "cobro_venta" && mov?.operacion_id) {
-    return { ok: false, error: "Esta financiación se marca como cobrada desde la operación." };
-  }
-
-  const { data, error } = await supabase.from("movimientos").update({ pendiente: false })
-    .eq("id", movId.data).eq("pendiente", true).select("id");
+  const { error } = await supabase.rpc("resolver_movimiento", { p_id: d.data.movimiento_id, p_medio: d.data.medio });
   if (error) return { ok: false, error: mensajeError(error) };
-  if (!data?.length) return { ok: false, error: "El movimiento ya estaba resuelto." };
 
-  revalidatePath("/caja");
-  revalidatePath("/");
+  revalidatePath("/", "layout");
   return { ok: true, mensaje: "Listo." };
+}
+
+/** Corrige si un movimiento ya resuelto fue en efectivo o por banco. */
+export async function cambiarMedio(_: Resultado | null, fd: FormData): Promise<Resultado> {
+  const { supabase } = await requerirAdmin();
+  const d = z.object({ movimiento_id: id, medio }).safeParse(datosFormulario(fd));
+  if (!d.success) return { ok: false, error: erroresZod(d.error) };
+
+  const { error } = await supabase.rpc("cambiar_medio_movimiento", { p_id: d.data.movimiento_id, p_medio: d.data.medio });
+  if (error) return { ok: false, error: mensajeError(error) };
+
+  revalidatePath("/", "layout");
+  return { ok: true, mensaje: "Medio corregido." };
 }
 
 export async function borrarMovimiento(_: Resultado | null, fd: FormData): Promise<Resultado> {

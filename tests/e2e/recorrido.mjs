@@ -181,6 +181,12 @@ for (const dispositivo of ["escritorio", "celular"]) {
     await page.goto(`${URL}/caja?pendientes=1`);
     await page.getByText("Comisión a vendedor o referido").first().waitFor();
     ok("comisión del vendedor figura como pendiente en caja");
+    await page.getByText("Cuánto queda realmente").waitFor();
+    await page.getByRole("button", { name: "Pagado" }).first().click();
+    await page.locator("dialog[open] select[name=medio]").selectOption("banco");
+    await page.locator("dialog[open]").getByRole("button", { name: /Confirmar pagado/ }).click();
+    await page.locator("dialog[open]").waitFor({ state: "detached" });
+    ok("resumen de caja con lo pendiente y pago marcado eligiendo el medio");
     await captura(page, "caja");
     await page.goto(`${URL}/reportes?moneda=ARS`);
     await page.getByText("Por canal de entrada").waitFor();

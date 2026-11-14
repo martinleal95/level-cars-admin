@@ -4,7 +4,7 @@ import { Wallet, Landmark, Banknote } from "lucide-react";
 import { requerirAdmin } from "@/lib/auth";
 import { dinero, fecha, hoyISO, type Moneda } from "@/lib/formato";
 import { Encabezado, Vacio, Kpi } from "@/components/ui";
-import { BotonesMovimiento, BotonPagado, BotonBorrar, BotonEditar } from "./paneles";
+import { BotonesMovimiento, BotonPagado, BotonBorrar, BotonEditar, BotonCambiarMedio } from "./paneles";
 
 export const metadata: Metadata = { title: "Caja" };
 
@@ -27,16 +27,29 @@ export default async function PaginaCaja({ searchParams }: { searchParams: Promi
     consulta = consulta.gte("fecha", `${mesValido}-01`).lt("fecha", fin);
   }
 
-  const [{ data: movs }, { data: saldos }, { data: motivos }, { data: personas }, { count: cantPend }] = await Promise.all([
+  const [{ data: movs }, { data: saldos }, { data: motivos }, { data: personas }, { count: cantPend }, { data: pend }] = await Promise.all([
     consulta,
     supabase.from("v_saldo_caja").select("*"),
     supabase.from("motivos_caja").select("id, nombre, tipo, es_gasto_fijo, activo").is("codigo", null).order("nombre"),
     supabase.from("personas").select("id, nombre").order("nombre"),
     supabase.from("movimientos").select("id", { count: "exact", head: true }).eq("pendiente", true).eq("anulado", false),
+    supabase.from("movimientos").select("tipo, monto, moneda, motivo:motivos_caja(codigo)").eq("pendiente", true).eq("anulado", false),
   ]);
 
   const saldo = (mon: Moneda, medio: string) => Number(saldos?.find((s) => s.moneda === mon && s.medio === medio)?.saldo ?? 0);
   const lista = movs ?? [];
+  // Lo que ya se cobró pero todavía no se pagó (al dueño, comisiones...) no es plata de la agencia:
+  // se muestra aparte y se descuenta para saber cuánto queda realmente.
+  const resumen = (["ARS", "USD"] as Moneda[]).map((mon) => {
+    const delMes = (pend ?? []).filter((x) => x.moneda === mon);
+    const suma = (f: (x: (typeof delMes)[number]) => boolean) => delMes.filter(f).reduce((s, x) => s + Number(x.monto), 0);
+    const codigo = (x: (typeof delMes)[number]) => (x.motivo as unknown as { codigo: string | null } | null)?.codigo;
+    const enCaja = saldo(mon, "efectivo") + saldo(mon, "banco");
+    const aDuenos = suma((x) => x.tipo === "egreso" && codigo(x) === "pago_tercero");
+    const otrosPagos = suma((x) => x.tipo === "egreso" && codigo(x) !== "pago_tercero");
+    const porCobrar = suma((x) => x.tipo === "ingreso");
+    return { mon, enCaja, aDuenos, otrosPagos, porCobrar, libre: enCaja - aDuenos - otrosPagos + porCobrar };
+  }).filter((r) => r.enCaja || r.aDuenos || r.otrosPagos || r.porCobrar);
   const totales = (["ARS", "USD"] as Moneda[]).map((mon) => ({
     mon,
     ing: lista.filter((x) => x.moneda === mon && x.tipo === "ingreso" && !x.pendiente).reduce((s, x) => s + Number(x.monto), 0),
@@ -55,6 +68,25 @@ export default async function PaginaCaja({ searchParams }: { searchParams: Promi
         <Kpi titulo="Efectivo en dólares" valor={dinero(saldo("USD", "efectivo"), "USD")} icono={Banknote} tono="verde" />
         <Kpi titulo="Banco en dólares" valor={dinero(saldo("USD", "banco"), "USD")} icono={Landmark} tono="verde" />
       </div>
+
+      {resumen.some((r) => r.aDuenos || r.otrosPagos || r.porCobrar) && (
+        <section className="tarjeta mb-6 p-4 sm:p-5" aria-label="Cuánto queda realmente">
+          <h2 className="text-lg font-bold">Cuánto queda realmente</h2>
+          <p className="ayuda mb-3 mt-0">Lo que está en caja incluye plata que todavía hay que pagar (al dueño de un auto, comisiones). Acá se descuenta.</p>
+          <div className="grid gap-4 sm:grid-cols-2">
+            {resumen.map((r) => (
+              <dl key={r.mon} className="divide-y divide-acero-100 text-sm">
+                <div className="flex justify-between gap-3 py-2"><dt className="text-acero-500">En caja ({r.mon === "ARS" ? "pesos" : "dólares"})</dt><dd className="cifra font-semibold">{dinero(r.enCaja, r.mon)}</dd></div>
+                {r.aDuenos > 0 && <div className="flex justify-between gap-3 py-2"><dt className="text-acero-500">Por pagar a dueños y agencieros</dt><dd className="cifra font-semibold text-red-600">− {dinero(r.aDuenos, r.mon)}</dd></div>}
+                {r.otrosPagos > 0 && <div className="flex justify-between gap-3 py-2"><dt className="text-acero-500">Otros pagos pendientes (comisiones...)</dt><dd className="cifra font-semibold text-red-600">− {dinero(r.otrosPagos, r.mon)}</dd></div>}
+                {r.porCobrar > 0 && <div className="flex justify-between gap-3 py-2"><dt className="text-acero-500">Por cobrar</dt><dd className="cifra font-semibold text-emerald-700">+ {dinero(r.porCobrar, r.mon)}</dd></div>}
+                <div className="flex justify-between gap-3 pt-3"><dt className="font-bold">Queda para la agencia</dt>
+                  <dd className={`cifra font-display text-xl font-extrabold ${r.libre >= 0 ? "text-emerald-700" : "text-red-600"}`}>{dinero(r.libre, r.mon)}</dd></div>
+              </dl>
+            ))}
+          </div>
+        </section>
+      )}
 
       <div className="mb-5 flex flex-wrap items-end justify-between gap-3">
         <div className="flex gap-2">
@@ -107,9 +139,10 @@ export default async function PaginaCaja({ searchParams }: { searchParams: Promi
                   {mv.descripcion && ` · ${mv.descripcion}`}
                   {mv.operacion_id && <> · <Link href={`/operaciones/${mv.operacion_id}`} className="font-semibold text-naranja-600">operación #{mv.operacion_id}</Link></>}
                 </p>
-                {(mv.pendiente || !mv.automatico) && (
+                {(mv.pendiente || !mv.automatico || (mv.motivo as unknown as Nombre)?.codigo !== "cobro_venta") && (
                   <div className="mt-2 flex justify-end gap-2 empty:hidden">
-                    {mv.pendiente && !((mv.motivo as unknown as Nombre)?.codigo === "cobro_venta" && mv.operacion_id) && <BotonPagado id={mv.id} tipo={mv.tipo} />}
+                    {mv.pendiente && !((mv.motivo as unknown as Nombre)?.codigo === "cobro_venta" && mv.operacion_id) && <BotonPagado id={mv.id} tipo={mv.tipo} medio={mv.medio} />}
+                    {!mv.pendiente && mv.automatico && (mv.motivo as unknown as Nombre)?.codigo !== "cobro_venta" && <BotonCambiarMedio id={mv.id} medio={mv.medio} />}
                     {!mv.automatico && (
                       <BotonEditar motivos={motivos ?? []} personas={personas ?? []} hoy={hoy}
                         mov={{ id: mv.id, tipo: mv.tipo, motivo_id: mv.motivo_id, monto: Number(mv.monto), moneda: mv.moneda, medio: mv.medio, fecha: mv.fecha, descripcion: mv.descripcion, persona_id: mv.persona_id }} />
