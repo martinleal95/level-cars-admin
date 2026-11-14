@@ -26,6 +26,7 @@ type Origen = "compra" | "consignacion" | "intermediacion";
 export type Inicial = {
   clienteId: string; canalId: string; vendedorId: string; fecha: string; moneda: Moneda; precio: string;
   cotizacion: string; montoTercero: string; porAgencia: boolean; notas: string;
+  medioTercero?: MedioCaja;
   pagos: Omit<Pago, "clave">[]; comisiones: Omit<Comision, "clave">[];
   /** Pagos de la operación que ya se marcaron como hechos (comisiones, pago al dueño). */
   pagados: { concepto: string; monto: number; moneda: Moneda }[];
@@ -38,7 +39,8 @@ export type Pago = {
   existente?: { id: number; vendido: boolean };
   bien: { tipo: string; marca: string; modelo: string; anio: string; dominio: string; kilometraje: string };
 };
-export type Comision = { clave: number; sentido: "pagada" | "cobrada"; quien: string; base: "fijo" | "pct_precio" | "pct_ganancia"; valor: string };
+type MedioCaja = "efectivo" | "banco";
+export type Comision = { clave: number; sentido: "pagada" | "cobrada"; quien: string; base: "fijo" | "pct_precio" | "pct_ganancia"; valor: string; medio: MedioCaja };
 
 const TIPOS_PAGO: { tipo: TipoPago; label: string; icono: typeof Banknote }[] = [
   { tipo: "efectivo", label: "Efectivo", icono: Banknote },
@@ -92,6 +94,7 @@ export function Asistente({ bienes, personas, vendedores, canales, financieras, 
     inicial?.pagos.length ? inicial.pagos.map((x) => ({ ...x, clave: siguiente++ })) : [pagoNuevo("efectivo", bienCargado?.moneda ?? "USD")]);
   const [comisiones, setComisiones] = useState<Comision[]>(() => (inicial?.comisiones ?? []).map((c) => ({ ...c, clave: siguiente++ })));
   const [notas, setNotas] = useState(inicial?.notas ?? "");
+  const [medioTercero, setMedioTercero] = useState<MedioCaja>(inicial?.medioTercero ?? "efectivo");
 
   // Corrección del origen del bien (solo en modo corrección).
   const [motivo, setMotivo] = useState("");
@@ -173,6 +176,7 @@ export function Asistente({ bienes, personas, vendedores, canales, financieras, 
     cotizacion: cot || null,
     monto_tercero: tercero && montoTercero ? n(montoTercero) : null,
     dinero_por_agencia: bien.origen === "intermediacion" ? porAgencia : true,
+    medio_tercero: tercero ? medioTercero : undefined,
     notas: notas || null,
     pagos: pagos.map((x) =>
       x.tipo === "financiacion" ? { tipo: x.tipo, monto: n(x.monto), moneda: x.moneda, financiera_id: Number(x.financiera_id) || 0, cobrado: x.cobrado }
@@ -185,11 +189,11 @@ export function Asistente({ bienes, personas, vendedores, canales, financieras, 
     comisiones: comisiones.map((c) => {
       const [clase, idq] = c.quien.split(":");
       return {
-        sentido: c.sentido, base: c.base, valor: n(c.valor),
+        sentido: c.sentido, base: c.base, valor: n(c.valor), medio: c.medio,
         persona_id: clase === "p" ? Number(idq) : null, financiera_id: clase === "f" ? Number(idq) : null,
       };
     }),
-  } : {}), [bien, clienteId, canalId, vendedorId, fecha, precio, moneda, cot, tercero, montoTercero, porAgencia, notas, pagos, comisiones]);
+  } : {}), [bien, clienteId, canalId, vendedorId, fecha, precio, moneda, cot, tercero, montoTercero, porAgencia, medioTercero, notas, pagos, comisiones]);
 
   const payload = useMemo(() => JSON.stringify(!correccion ? operacion : {
     operacion_id: correccion.operacionId,
@@ -370,6 +374,14 @@ export function Asistente({ bienes, personas, vendedores, canales, financieras, 
                 onChange={(e) => setMontoTercero(e.target.value)} />
             </Campo>
           )}
+          {tercero && (
+            <Campo etiqueta={`El pago al ${bien?.origen === "consignacion" ? "dueño" : "agenciero"} sale por`} htmlFor="medio_tercero" className="sm:col-span-1"
+              ayuda="Podés cambiarlo después, al marcarlo como pagado.">
+              <select id="medio_tercero" className="campo" value={medioTercero} onChange={(e) => setMedioTercero(e.target.value as MedioCaja)}>
+                <option value="efectivo">Efectivo</option><option value="banco">Banco / transferencia</option>
+              </select>
+            </Campo>
+          )}
           {bien?.origen === "intermediacion" && (
             <fieldset className="sm:col-span-3">
               <legend className="etiqueta">¿Por dónde pasa el dinero del comprador?</legend>
@@ -491,7 +503,7 @@ export function Asistente({ bienes, personas, vendedores, canales, financieras, 
               {comisiones.map((c) => (
                 <li key={c.clave} className="flex flex-wrap items-end gap-3 rounded-xl p-3 ring-1 ring-acero-200">
                   <Campo etiqueta="Tipo" htmlFor={`cs_${c.clave}`} className="min-w-36 flex-1">
-                    <select id={`cs_${c.clave}`} className="campo" value={c.sentido} onChange={(e) => actualizarComision(c.clave, { sentido: e.target.value as Comision["sentido"], quien: "" })}>
+                    <select id={`cs_${c.clave}`} className="campo" value={c.sentido} onChange={(e) => actualizarComision(c.clave, { sentido: e.target.value as Comision["sentido"], quien: "", medio: e.target.value === "cobrada" ? "banco" : "efectivo" })}>
                       <option value="pagada">La paga la agencia</option><option value="cobrada">La cobra la agencia</option>
                     </select>
                   </Campo>
@@ -505,6 +517,11 @@ export function Asistente({ bienes, personas, vendedores, canales, financieras, 
                   <Campo etiqueta="Cálculo" htmlFor={`cb_${c.clave}`} className="min-w-40 flex-1">
                     <select id={`cb_${c.clave}`} className="campo" value={c.base} onChange={(e) => actualizarComision(c.clave, { base: e.target.value as Comision["base"] })}>
                       <option value="fijo">Monto fijo</option><option value="pct_precio">% del precio</option><option value="pct_ganancia">% de la ganancia</option>
+                    </select>
+                  </Campo>
+                  <Campo etiqueta={c.sentido === "pagada" ? "Se paga por" : "Se cobra por"} htmlFor={`cmd_${c.clave}`} className="min-w-36 flex-1">
+                    <select id={`cmd_${c.clave}`} className="campo" value={c.medio} onChange={(e) => actualizarComision(c.clave, { medio: e.target.value as MedioCaja })}>
+                      <option value="efectivo">Efectivo</option><option value="banco">Banco / transferencia</option>
                     </select>
                   </Campo>
                   <Campo etiqueta={c.base === "fijo" ? "Monto" : "Porcentaje"} htmlFor={`cv_${c.clave}`} className="w-32">
@@ -521,10 +538,10 @@ export function Asistente({ bienes, personas, vendedores, canales, financieras, 
             </ul>
           )}
           <div className="flex flex-wrap gap-2">
-            <button type="button" className="btn-secundario" onClick={() => setComisiones((cs) => [...cs, { clave: siguiente++, sentido: "pagada", quien: vendedorId ? `p:${vendedorId}` : "", base: "pct_ganancia", valor: "" }])}>
+            <button type="button" className="btn-secundario" onClick={() => setComisiones((cs) => [...cs, { clave: siguiente++, sentido: "pagada", quien: vendedorId ? `p:${vendedorId}` : "", base: "pct_ganancia", valor: "", medio: "efectivo" }])}>
               <Plus className="size-4" aria-hidden /> Comisión a pagar (vendedor, referido)
             </button>
-            <button type="button" className="btn-secundario" onClick={() => setComisiones((cs) => [...cs, { clave: siguiente++, sentido: "cobrada", quien: "", base: "pct_precio", valor: "" }])}>
+            <button type="button" className="btn-secundario" onClick={() => setComisiones((cs) => [...cs, { clave: siguiente++, sentido: "cobrada", quien: "", base: "pct_precio", valor: "", medio: "banco" }])}>
               <Plus className="size-4" aria-hidden /> Comisión a cobrar (financiera)
             </button>
           </div>

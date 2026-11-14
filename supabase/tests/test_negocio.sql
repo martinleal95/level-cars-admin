@@ -352,6 +352,22 @@ select public.cambiar_medio_movimiento(:com_etios, 'banco');
 select pg_temp.check((select medio = 'banco' from public.movimientos where id = :com_etios), 'medio corregido');
 select pg_temp.esperar_error(format($q$select public.cambiar_medio_movimiento((select id from public.movimientos where operacion_id = %s and monto = 20000), 'efectivo')$q$, :op_etios), 'no se cambia');
 
+-- ================= 8. Medio elegido en comisiones y pago al dueño (migración 0014) =================
+select public.crear_bien(jsonb_build_object('tipo','auto','marca','Suzuki','modelo','Fun','origen','consignacion',
+  'dueno_id',(select id from public.personas where nombre='Dueño Consig'),'monto_acordado',4000,'moneda','USD')) as fun \gset
+select public.registrar_operacion(jsonb_build_object(
+  'bien_id', :fun, 'cliente_id', :cli1, 'precio_venta', 5000, 'moneda', 'USD', 'medio_tercero', 'banco',
+  'pagos', jsonb_build_array(jsonb_build_object('tipo','transferencia','monto',5000)),
+  'comisiones', jsonb_build_array(
+    jsonb_build_object('sentido','pagada','persona_id',(select id from public.personas where nombre='Vendedor'),'base','fijo','valor',100,'medio','banco'),
+    jsonb_build_object('sentido','pagada','persona_id',(select id from public.personas where nombre='Vendedor'),'base','fijo','valor',50)))) as op_fun \gset
+select pg_temp.check((select medio = 'banco' from public.movimientos m join public.motivos_caja mc on mc.id = m.motivo_id
+  where m.operacion_id = :op_fun and mc.codigo = 'pago_tercero') , 'pago al dueño por banco');
+select pg_temp.check((select count(*) from public.movimientos m join public.motivos_caja mc on mc.id = m.motivo_id
+  where m.operacion_id = :op_fun and mc.codigo = 'comision_pagada' and m.medio = 'banco' and m.monto = 100) = 1, 'comisión elegida por banco');
+select pg_temp.check((select count(*) from public.movimientos m join public.motivos_caja mc on mc.id = m.motivo_id
+  where m.operacion_id = :op_fun and mc.codigo = 'comision_pagada' and m.medio = 'efectivo' and m.monto = 50) = 1, 'comisión sin elegir queda en efectivo');
+
 -- Auditoría registrada
 select pg_temp.check((select count(*) from public.auditoria) > 20, 'auditoría registrada');
 

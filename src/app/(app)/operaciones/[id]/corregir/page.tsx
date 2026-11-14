@@ -27,13 +27,13 @@ export default async function PaginaCorregir({ params }: { params: Promise<{ id:
     supabase.from("operacion_pagos")
       .select("tipo, monto, monto_pago, moneda_pago, financiera_id, cobrado, bien:bienes!operacion_pagos_bien_recibido_id_fkey(id, estado, tipo, marca, modelo, anio, dominio, kilometraje)")
       .eq("operacion_id", opId).order("id"),
-    supabase.from("operacion_comisiones").select("sentido, persona_id, financiera_id, base, valor").eq("operacion_id", opId).order("id"),
+    supabase.from("operacion_comisiones").select("id, sentido, persona_id, financiera_id, base, valor").eq("operacion_id", opId).order("id"),
     supabase.from("personas").select("id, nombre, es_vendedor").order("nombre"),
     supabase.from("canales").select("id, nombre").or(`activo.eq.true${o.canal_id ? `,id.eq.${Number(o.canal_id)}` : ""}`).order("nombre"),
     supabase.from("financieras").select("id, nombre, comision_base, comision_valor").order("nombre"),
     // Comisiones y pagos al dueño que ya se marcaron como hechos
-    supabase.from("movimientos").select("monto, moneda, motivo:motivos_caja(nombre), persona:personas(nombre)")
-      .eq("operacion_id", opId).eq("automatico", true).eq("anulado", false).eq("pendiente", false).is("pago_id", null).is("reserva_id", null).order("id"),
+    supabase.from("movimientos").select("monto, moneda, medio, pendiente, persona_id, motivo:motivos_caja(nombre, codigo), persona:personas(nombre)")
+      .eq("operacion_id", opId).eq("automatico", true).eq("anulado", false).is("pago_id", null).is("reserva_id", null).order("id"),
   ]);
   if (!b) notFound();
 
@@ -51,6 +51,8 @@ export default async function PaginaCorregir({ params }: { params: Promise<{ id:
     } : null,
   };
 
+  const codigoDe = (x: { motivo: unknown }) => (x.motivo as { codigo: string | null } | null)?.codigo;
+  const usados = new Set<unknown>();
   type BienRecibido = { id: number; estado: string; tipo: string; marca: string; modelo: string; anio: number | null; dominio: string | null; kilometraje: number | null } | null;
   const inicial: Inicial = {
     clienteId: String(o.cliente_id),
@@ -79,13 +81,21 @@ export default async function PaginaCorregir({ params }: { params: Promise<{ id:
         },
       };
     }),
-    comisiones: (comisiones ?? []).map((c) => ({
-      sentido: c.sentido as "pagada" | "cobrada",
-      quien: c.persona_id ? `p:${c.persona_id}` : `f:${c.financiera_id}`,
-      base: c.base as "fijo" | "pct_precio" | "pct_ganancia",
-      valor: texto(c.valor),
-    })),
-    pagados: (pagados ?? []).map((x) => {
+    medioTercero: ((pagados ?? []).find((x) => codigoDe(x) === "pago_tercero")?.medio ?? "efectivo") as "efectivo" | "banco",
+    comisiones: (comisiones ?? []).map((c) => {
+      // el medio con que se cargó cada comisión: el de su movimiento de caja (una por persona, en orden)
+      const codigo = c.sentido === "pagada" ? "comision_pagada" : "comision_cobrada";
+      const mv = (pagados ?? []).find((x) => codigoDe(x) === codigo && x.persona_id === c.persona_id && !usados.has(x));
+      if (mv) usados.add(mv);
+      return {
+        sentido: c.sentido as "pagada" | "cobrada",
+        quien: c.persona_id ? `p:${c.persona_id}` : `f:${c.financiera_id}`,
+        base: c.base as "fijo" | "pct_precio" | "pct_ganancia",
+        valor: texto(c.valor),
+        medio: (mv?.medio ?? (c.sentido === "pagada" ? "efectivo" : "banco")) as "efectivo" | "banco",
+      };
+    }),
+    pagados: (pagados ?? []).filter((x) => !x.pendiente).map((x) => {
       const persona = (x.persona as unknown as { nombre: string } | null)?.nombre;
       return {
         concepto: `${(x.motivo as unknown as { nombre: string } | null)?.nombre ?? "Pago"}${persona ? ` a ${persona}` : ""}`,

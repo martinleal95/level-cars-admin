@@ -47,6 +47,7 @@ const comision = z
     persona_id: idNulo,
     financiera_id: idNulo,
     base: z.enum(["fijo", "pct_precio", "pct_ganancia"]),
+    medio: z.enum(["efectivo", "banco"]).optional(),
     valor: num.min(0, "El valor de la comisión no puede ser negativo"),
     descripcion: textoCorto(200),
   })
@@ -64,6 +65,7 @@ const operacion = z.object({
   cotizacion: z.union([z.null(), num.positive("La cotización debe ser mayor a cero")]).optional(),
   monto_tercero: z.union([z.null(), num.min(0)]).optional(),
   dinero_por_agencia: z.boolean().default(true),
+  medio_tercero: z.enum(["efectivo", "banco"]).optional(),
   notas: textoCorto(2000),
   pagos: z.array(pago).max(20),
   comisiones: z.array(comision).max(20),

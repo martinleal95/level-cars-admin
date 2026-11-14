@@ -158,6 +158,7 @@ for (const dispositivo of ["escritorio", "celular"]) {
     await pagoBien.locator("[id^=bmodelo_]").fill(`CB190 E2E ${sufijo}`);
     await page.getByRole("button", { name: /Comisión a pagar/ }).click();
     await page.locator("[id^=cv_]").fill("10");
+    await page.locator("[id^=cmd_]").selectOption("banco");
     await page.getByText("Los pagos cubren el precio").waitFor();
     // ganancia estimada: 10M - 7M - 0.1M = 2.9M; comisión 10% = 290.000 -> 2.610.000
     await page.getByText("$ 2.610.000").first().waitFor();
@@ -182,6 +183,7 @@ for (const dispositivo of ["escritorio", "celular"]) {
     await page.getByText("Comisión a vendedor o referido").first().waitFor();
     ok("comisión del vendedor figura como pendiente en caja");
     await page.getByText("Cuánto queda realmente").waitFor();
+    await page.locator("li", { hasText: `Comisión: Venta de Ford Focus E2E ${sufijo}` }).getByText("Banco").waitFor();
     await page.getByRole("button", { name: "Pagado" }).first().click();
     await page.locator("dialog[open] select[name=medio]").selectOption("banco");
     await page.locator("dialog[open]").getByRole("button", { name: /Confirmar pagado/ }).click();
