@@ -4,7 +4,7 @@ import { z } from "zod";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { requerirAdmin } from "@/lib/auth";
-import { type Resultado, mensajeError, erroresZod, id, texto } from "@/lib/acciones";
+import { type Resultado, mensajeError, erroresZod, id, texto, textoOpcional, enteroOpcional, montoOpcional, idOpcional, moneda as monedaZ } from "@/lib/acciones";
 
 const num = z.coerce.number().finite();
 // OJO: en las uniones va primero z.null(). z.coerce convierte null en 0, y así un
@@ -161,4 +161,75 @@ export async function marcarFinanciacionCobrada(_: Resultado | null, fd: FormDat
 
   revalidatePath("/", "layout");
   return { ok: true, mensaje: "Financiación marcada como cobrada." };
+}
+
+// ---------- Altas rápidas desde la pantalla de venta ----------
+type Rapido<T> = ({ ok: true } & T) | { ok: false; error: string };
+
+const personaRapida = z.object({ nombre: texto(120, "el nombre"), telefono: textoOpcional(40), rol: z.enum(["cliente", "referido"]).default("cliente") });
+
+/** Alta rápida de un cliente o de un referido desde la venta: nombre y contacto. */
+export async function crearPersonaRapida(datos: unknown): Promise<Rapido<{ id: number; nombre: string }>> {
+  const { supabase } = await requerirAdmin();
+  const d = personaRapida.safeParse(datos);
+  if (!d.success) return { ok: false, error: erroresZod(d.error) };
+
+  const { data, error } = await supabase.from("personas")
+    .insert({ nombre: d.data.nombre, telefono: d.data.telefono ?? null, es_cliente: d.data.rol === "cliente", es_referido: d.data.rol === "referido" })
+    .select("id, nombre").single();
+  if (error) return { ok: false, error: mensajeError(error) };
+
+  revalidatePath("/personas");
+  return { ok: true, id: data.id, nombre: data.nombre };
+}
+
+const bienRapido = z
+  .object({
+    tipo: z.enum(["auto", "moto", "celular", "otro"], { message: "Elegí el tipo de bien" }),
+    marca: texto(60, "la marca"),
+    modelo: texto(80, "el modelo"),
+    anio: enteroOpcional(1900, 2100),
+    dominio: textoOpcional(40),
+    origen: z.enum(["compra", "consignacion", "intermediacion"], { message: "Elegí de quién es" }),
+    moneda: monedaZ,
+    costo: montoOpcional,
+    precio_publicado: montoOpcional,
+    en_agencia: z.boolean(),
+    dueno_id: idOpcional,
+    dueno_nuevo: z.object({ nombre: texto(120, "el nombre del dueño"), telefono: textoOpcional(40) }).nullable().optional(),
+    monto_acordado: montoOpcional,
+  })
+  .superRefine((d, ctx) => {
+    if (d.origen !== "compra") {
+      if (!d.dueno_id && !d.dueno_nuevo) ctx.addIssue({ code: "custom", message: "Elegí el dueño del bien" });
+      if (d.monto_acordado == null) ctx.addIssue({ code: "custom", message: "Indicá el monto acordado con el dueño" });
+    }
+  });
+
+/** Alta rápida de un bien desde la venta. Si el dueño es nuevo, se crea junto con el bien. */
+export async function crearBienRapido(datos: unknown): Promise<Rapido<{ id: number; dueno: { id: number; nombre: string } | null }>> {
+  const { supabase } = await requerirAdmin();
+  const d = bienRapido.safeParse(datos);
+  if (!d.success) return { ok: false, error: erroresZod(d.error) };
+  const { dueno_nuevo, ...resto } = d.data;
+
+  let dueno: { id: number; nombre: string } | null = null;
+  if (resto.origen !== "compra" && !resto.dueno_id && dueno_nuevo) {
+    const { data, error } = await supabase.from("personas")
+      .insert({
+        nombre: dueno_nuevo.nombre, telefono: dueno_nuevo.telefono ?? null,
+        es_dueno: resto.origen === "consignacion", es_agenciero: resto.origen === "intermediacion",
+      })
+      .select("id, nombre").single();
+    if (error) return { ok: false, error: mensajeError(error) };
+    dueno = data;
+    resto.dueno_id = data.id;
+  }
+
+  const { data: bienId, error } = await supabase.rpc("crear_bien", { p: resto });
+  if (error) return { ok: false, error: mensajeError(error) };
+
+  revalidatePath("/stock");
+  revalidatePath("/personas");
+  return { ok: true, id: Number(bienId), dueno };
 }

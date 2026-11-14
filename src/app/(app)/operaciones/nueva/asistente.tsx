@@ -11,6 +11,7 @@ import { Campo } from "@/components/ui";
 import { dinero, type Moneda } from "@/lib/formato";
 import { parsearNumero, numeroATexto, formatearPatente } from "@/lib/numero";
 import { registrarOperacion, corregirOperacion } from "../acciones";
+import { NuevoBienRapido, NuevoClienteRapido } from "./altas-rapidas";
 
 export type BienDisponible = {
   id: number; marca: string; modelo: string; anio: number | null; dominio: string | null;
@@ -70,7 +71,7 @@ const pagoNuevo = (tipo: TipoPago, moneda: Moneda): Pago => ({
   bien: { tipo: "moto", marca: "", modelo: "", anio: "", dominio: "", kilometraje: "" },
 });
 
-export function Asistente({ bienes, personas, vendedores, canales, financieras, bienInicial, hoy, inicial, correccion }: {
+export function Asistente({ bienes: bienesIniciales, personas: personasIniciales, vendedores, canales, financieras, bienInicial, hoy, inicial, correccion }: {
   bienes: BienDisponible[]; personas: Opcion[]; vendedores: Opcion[]; canales: Opcion[];
   financieras: (Opcion & { comision_base: string | null; comision_valor: number | null })[];
   bienInicial?: number; hoy: string;
@@ -78,6 +79,9 @@ export function Asistente({ bienes, personas, vendedores, canales, financieras, 
   inicial?: Inicial; correccion?: { operacionId: number };
 }) {
   const { estado, alEnviar, pendiente } = useEnvio(correccion ? corregirOperacion : registrarOperacion);
+  // Los bienes y personas dados de alta desde esta misma pantalla se suman a las listas.
+  const [bienes, setBienes] = useState(bienesIniciales);
+  const [personas, setPersonas] = useState(personasIniciales);
 
   const [bienId, setBienId] = useState<number | null>(bienInicial && bienes.some((b) => b.id === bienInicial) ? bienInicial : null);
   const bienCargado = bienes.find((b) => b.id === bienId) ?? null;
@@ -122,8 +126,8 @@ export function Asistente({ bienes, personas, vendedores, canales, financieras, 
     setPorAgencia(original ? inicial?.porAgencia ?? true : true);
   }
 
-  function elegirBien(id: number) {
-    const b = bienes.find((x) => x.id === id)!;
+  function elegirBien(id: number, nuevo?: BienDisponible) {
+    const b = nuevo ?? bienes.find((x) => x.id === id)!;
     setBienId(id);
     setMoneda(b.moneda);
     setPrecio(b.precio_publicado ? numeroATexto(b.precio_publicado) : "");
@@ -132,6 +136,23 @@ export function Asistente({ bienes, personas, vendedores, canales, financieras, 
     // los pagos que nadie tocó pasan a la moneda del bien
     setPagos((ps) => ps.map((x) => (x.monto ? x : { ...x, moneda: b.moneda })));
     if (b.reserva) setClienteId(String(b.reserva.cliente_id));
+  }
+
+  function bienCreado(b: BienDisponible, dueno: Opcion | null) {
+    setBienes((l) => [...l, b]);
+    if (dueno) setPersonas((l) => [...l, dueno].sort((x, y) => x.nombre.localeCompare(y.nombre)));
+    elegirBien(b.id, b);
+  }
+  function clienteCreado(p: Opcion, canal: string) {
+    setPersonas((l) => [...l, p].sort((x, y) => x.nombre.localeCompare(y.nombre)));
+    setClienteId(String(p.id));
+    if (canal) setCanalId(canal);
+  }
+
+  function referidoCreado(p: Opcion) {
+    setPersonas((l) => [...l, p].sort((x, y) => x.nombre.localeCompare(y.nombre)));
+    // la comisión del referido queda armada: solo falta el valor
+    setComisiones((cs) => [...cs, { clave: siguiente++, sentido: "pagada", quien: `p:${p.id}`, base: "fijo", valor: "", medio: "efectivo" }]);
   }
 
   const tercero = bien?.origen === "consignacion" || bien?.origen === "intermediacion";
@@ -244,7 +265,7 @@ export function Asistente({ bienes, personas, vendedores, canales, financieras, 
         <section className="tarjeta p-4 sm:p-6">
           <Paso n={1} titulo="¿Qué se vende?" />
           {bienes.length === 0 ? (
-            <p className="text-sm text-acero-500">No hay bienes disponibles. <Link href="/stock/nuevo?vender=1" className="font-semibold text-naranja-600">Cargá uno</Link>.</p>
+            <p className="text-sm text-acero-500">No hay bienes disponibles en el stock. Agregá el que vas a vender:</p>
           ) : (
             <select className="campo" value={bienId ?? ""} onChange={(e) => elegirBien(Number(e.target.value))} aria-label="Bien que se vende" required disabled={!!correccion}>
               <option value="" disabled>Elegí un bien del stock</option>
@@ -266,11 +287,11 @@ export function Asistente({ bienes, personas, vendedores, canales, financieras, 
               {bien.reserva && <span className="font-semibold text-amber-700">Reservado por {bien.reserva.cliente} con {dinero(bien.reserva.monto, bien.reserva.moneda)}</span>}
             </div>
           )}
-          {!correccion && bienes.length > 0 && (
-            <p className="ayuda">
-              ¿No está en la lista? Si es un auto de otra agencia o de un particular que no tenés en el local,{" "}
-              <Link href="/stock/nuevo?vender=1" className="font-semibold text-naranja-600 hover:underline">cargalo acá</Link> y volvés directo a esta venta.
-            </p>
+          {!correccion && (
+            <div className="mt-3">
+              <NuevoBienRapido personas={personas} onCreado={bienCreado} />
+              <p className="ayuda">¿No está en la lista? Cargalo acá mismo (por ejemplo un auto de otra agencia que no tenés en el local) y queda elegido para esta venta.</p>
+            </div>
           )}
           {correccion && bienCargado && bienCargado.origen !== "parte_pago" && (
             <div className="mt-4 rounded-xl p-4 ring-1 ring-acero-200">
@@ -327,11 +348,12 @@ export function Asistente({ bienes, personas, vendedores, canales, financieras, 
         <section className="tarjeta grid gap-4 p-4 sm:grid-cols-2 sm:p-6">
           <div className="sm:col-span-2"><Paso n={2} titulo="¿A quién y cómo llegó?" /></div>
           <Campo etiqueta="Cliente" htmlFor="cliente"
-            ayuda={bien?.reserva ? "Es quien dejó la seña. Para venderle a otra persona, primero cerrá la reserva." : personas.length ? undefined : "Primero cargalo en Personas."}>
+            ayuda={bien?.reserva ? "Es quien dejó la seña. Para venderle a otra persona, primero cerrá la reserva." : undefined}>
             <select id="cliente" className="campo" value={clienteId} onChange={(e) => setClienteId(e.target.value)} required disabled={!!bien?.reserva}>
               <option value="" disabled>Elegí el cliente</option>
               {personas.map((p) => <option key={p.id} value={p.id}>{p.nombre}</option>)}
             </select>
+            {!bien?.reserva && <div className="mt-2"><NuevoClienteRapido canales={canales} onCreado={clienteCreado} /></div>}
           </Campo>
           <Campo etiqueta="Canal por donde llegó" htmlFor="canal">
             <select id="canal" className="campo" value={canalId} onChange={(e) => setCanalId(e.target.value)}>
@@ -544,6 +566,7 @@ export function Asistente({ bienes, personas, vendedores, canales, financieras, 
             <button type="button" className="btn-secundario" onClick={() => setComisiones((cs) => [...cs, { clave: siguiente++, sentido: "cobrada", quien: "", base: "pct_precio", valor: "", medio: "banco" }])}>
               <Plus className="size-4" aria-hidden /> Comisión a cobrar (financiera)
             </button>
+            <NuevoClienteRapido canales={canales} rol="referido" onCreado={referidoCreado} />
           </div>
           <Campo etiqueta="Notas" htmlFor="notas" className="mt-5">
             <textarea id="notas" rows={2} maxLength={2000} className="campo" value={notas} onChange={(e) => setNotas(e.target.value)} />

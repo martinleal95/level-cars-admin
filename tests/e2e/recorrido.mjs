@@ -253,27 +253,45 @@ for (const dispositivo of ["escritorio", "celular"]) {
     if ((await page.getByText(`Honda CB190 E2E ${sufijo}`).count()) !== 1) throw new Error("La moto recibida se duplicó o se perdió al corregir");
     ok("la moto recibida como parte de pago se conservó al corregir");
 
-    // 12. Vender un auto que no está en la agencia, cargándolo desde la venta
+    // 12. Vender un auto que no está en la agencia: bien y cliente nuevos, cargados desde la misma venta
     await page.goto(`${URL}/operaciones/nueva`);
-    await page.getByRole("link", { name: "cargalo acá" }).click();
-    await page.waitForURL(/stock\/nuevo\?vender=1/);
-    await page.fill("#marca", "Fiat");
-    await page.fill("#modelo", `Cronos E2E ${sufijo}`);
-    await page.selectOption("#moneda", "ARS");
-    await page.selectOption("#dueno_id", { label: `Vendedor E2E ${sufijo}` });
-    await page.fill("#monto_acordado", "9.000.000");
-    await captura(page, "bien-fuera-de-agencia");
-    await page.getByRole("button", { name: "Guardar y seguir con la venta" }).click();
-    await page.waitForURL(/operaciones\/nueva\?bien=\d+/);
+    await page.getByRole("button", { name: "Agregar un bien nuevo" }).click();
+    let dlg = page.locator("dialog[open]");
+    await dlg.locator("#rb_marca").fill("Fiat");
+    await dlg.locator("#rb_modelo").fill(`Cronos E2E ${sufijo}`);
+    await dlg.locator("#rb_moneda").selectOption("ARS");
+    await dlg.locator("#rb_dueno").selectOption("nuevo");
+    await dlg.locator("#rb_dn").fill(`Dueño Rápido ${sufijo}`);
+    await dlg.locator("#rb_acordado").fill("9000000");
+    await captura(page, "bien-rapido");
+    await dlg.getByRole("button", { name: "Guardar y usar en la venta" }).click();
+    await page.locator("dialog[open]").waitFor({ state: "detached" });
     await page.getByText("Intermediación").first().waitFor();
-    await page.selectOption("#cliente", { label: `Cliente E2E ${sufijo}` });
+    await page.getByRole("button", { name: "Cliente nuevo" }).click();
+    dlg = page.locator("dialog[open]");
+    await dlg.locator("#rc_nombre").fill(`Cliente Rápido ${sufijo}`);
+    await dlg.locator("#rc_tel").fill("11 5555-1234");
+    await dlg.locator("#rc_canal").selectOption({ label: "Instagram" });
+    await dlg.getByRole("button", { name: "Guardar y usar en la venta" }).click();
+    await page.locator("dialog[open]").waitFor({ state: "detached" });
+    if ((await page.locator("#cliente option:checked").innerText()) !== `Cliente Rápido ${sufijo}`) throw new Error("El cliente nuevo no quedó elegido");
+    if ((await page.locator("#canal option:checked").innerText()) !== "Instagram") throw new Error("El canal del cliente nuevo no quedó elegido");
     await page.fill("#precio", "9.500.000");
     await page.getByRole("button", { name: "Completar saldo" }).click();
     await page.getByText("Los pagos cubren el precio").waitFor();
+    await page.getByRole("button", { name: "Referido nuevo" }).click();
+    dlg = page.locator("dialog[open]");
+    await dlg.locator("#rc_nombre").fill(`Referido Rápido ${sufijo}`);
+    await dlg.locator("#rc_tel").fill("11 4444-9999");
+    await dlg.getByRole("button", { name: "Guardar y agregar su comisión" }).click();
+    await page.locator("dialog[open]").waitFor({ state: "detached" });
+    if ((await page.locator("[id^=cq_] option:checked").innerText()) !== `Referido Rápido ${sufijo}`) throw new Error("El referido nuevo no quedó en la comisión");
+    await page.locator("[id^=cv_]").fill("100.000");
+    await page.getByText("$ 400.000").first().waitFor();
     await page.getByRole("button", { name: "Confirmar venta" }).click();
     await page.waitForURL(/\/operaciones\/\d+\?nueva=1/);
-    await page.getByText("$ 500.000").first().waitFor();
-    ok("auto fuera de la agencia cargado desde la venta y vendido (ganancia $ 500.000)");
+    await page.getByText("$ 400.000").first().waitFor();
+    ok("bien, cliente y referido nuevos cargados desde la venta, auto fuera de la agencia vendido (ganancia $ 400.000 tras la comisión del referido)");
 
     // 13. Bien cargado por error: se marca fuera de la agencia, se cambia el origen y se borra
     await page.goto(`${URL}/stock/nuevo`);
@@ -305,7 +323,7 @@ for (const dispositivo of ["escritorio", "celular"]) {
     // 14. Caja: editar un movimiento manual. Personas: borrar una sin uso; una con ventas no se borra
     await page.goto(`${URL}/caja`);
     await page.getByRole("button", { name: "Egreso", exact: true }).click();
-    let dlg = page.locator("dialog[open]");
+    dlg = page.locator("dialog[open]");
     await dlg.locator("#mv_motivo").selectOption({ index: 1 });
     await dlg.locator("#mv_monto").fill("12.345");
     await dlg.locator("#mv_desc").fill(`Gasto E2E ${sufijo}`);
