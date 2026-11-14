@@ -12,7 +12,7 @@ export function BotonAnular({ operacionId }: { operacionId: number }) {
         <Formulario accion={anularOperacion} alGuardar={cerrar} className="space-y-4">
           <input type="hidden" name="operacion_id" value={operacionId} />
           <p className="text-sm text-acero-500">
-            Usalo solo si la operación se cargó mal. El bien vuelve al stock, los movimientos de caja se anulan
+            Usalo si la venta no se hizo. Si solo tiene datos mal cargados, usá «Corregir». El bien vuelve al stock, los movimientos de caja se anulan
             y los bienes recibidos como parte de pago salen del stock.
           </p>
           <Campo etiqueta="Motivo" htmlFor="an_motivo">

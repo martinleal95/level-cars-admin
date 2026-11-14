@@ -1,9 +1,9 @@
 "use client";
 
-import { Save, UserPlus } from "lucide-react";
+import { Save, UserPlus, Trash2 } from "lucide-react";
 import { Formulario, BotonEnviar, Dialogo } from "@/components/formulario";
 import { Campo } from "@/components/ui";
-import { guardarPersona } from "./acciones";
+import { guardarPersona, borrarPersona } from "./acciones";
 
 export type Persona = {
   id?: number; nombre?: string; telefono?: string | null; dni?: string | null; email?: string | null; notas?: string | null;
@@ -64,6 +64,22 @@ export function EditarPersona({ persona }: { persona: Persona }) {
   return (
     <Dialogo boton="Editar" titulo={`Editar a ${persona.nombre}`} variante="secundario">
       {(cerrar) => <Campos p={persona} cerrar={cerrar} />}
+    </Dialogo>
+  );
+}
+
+export function BorrarPersona({ persona }: { persona: Persona }) {
+  return (
+    <Dialogo boton="" titulo={`Borrar a ${persona.nombre}`} variante="fantasma" icono={<Trash2 className="size-5 text-red-600" aria-label={`Borrar a ${persona.nombre}`} />}>
+      {(cerrar) => (
+        <Formulario accion={borrarPersona} alGuardar={cerrar} className="space-y-4">
+          <input type="hidden" name="persona_id" value={persona.id} />
+          <p className="text-sm text-acero-500">
+            Solo se puede borrar si no tiene ventas, bienes, reservas ni movimientos a su nombre. No se puede deshacer.
+          </p>
+          <BotonEnviar variante="peligro" className="w-full">Borrar definitivamente</BotonEnviar>
+        </Formulario>
+      )}
     </Dialogo>
   );
 }

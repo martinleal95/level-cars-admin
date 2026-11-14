@@ -7,7 +7,9 @@ import { requerirAdmin } from "@/lib/auth";
 import { type Resultado, mensajeError, erroresZod, id, texto } from "@/lib/acciones";
 
 const num = z.coerce.number().finite();
-const idNulo = z.union([z.coerce.number().int().positive(), z.null()]).optional();
+// OJO: en las uniones va primero z.null(). z.coerce convierte null en 0, y así un
+// "sin indicar" se guardaba como cero (p. ej. el monto para el dueño).
+const idNulo = z.union([z.null(), z.coerce.number().int().positive()]).optional();
 const textoCorto = (max: number) => z.string().trim().max(max).optional().nullable();
 
 const bienRecibido = z.object({
@@ -15,9 +17,9 @@ const bienRecibido = z.object({
   marca: z.string().trim().min(1, "Completá la marca del bien recibido").max(60),
   modelo: z.string().trim().min(1, "Completá el modelo del bien recibido").max(80),
   version: textoCorto(80),
-  anio: z.union([z.coerce.number().int().min(1900).max(2100), z.null()]).optional(),
+  anio: z.union([z.null(), z.coerce.number().int().min(1900).max(2100)]).optional(),
   dominio: textoCorto(40),
-  kilometraje: z.union([z.coerce.number().int().min(0), z.null()]).optional(),
+  kilometraje: z.union([z.null(), z.coerce.number().int().min(0)]).optional(),
   color: textoCorto(40),
   notas: textoCorto(1500),
 });
@@ -31,7 +33,12 @@ const pago = z.discriminatedUnion("tipo", [
     financiera_id: z.coerce.number({ message: "Elegí la financiera" }).int().positive("Elegí la financiera"),
     cobrado: z.boolean().default(false),
   }),
-  z.object({ tipo: z.literal("bien"), monto: num.positive("Indicá el valor del bien recibido"), moneda: monedaPago, bien: bienRecibido }),
+  z.object({
+    tipo: z.literal("bien"), monto: num.positive("Indicá el valor del bien recibido"), moneda: monedaPago,
+    bien: bienRecibido.optional(),
+    // Solo al corregir: el bien ya se había recibido en esta misma venta y se conserva.
+    bien_existente_id: z.number().int().positive().optional(),
+  }).refine((p) => !!p.bien !== !!p.bien_existente_id, "Faltan los datos del bien recibido"),
 ]);
 
 const comision = z
@@ -54,8 +61,8 @@ const operacion = z.object({
   fecha: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Fecha inválida"),
   precio_venta: num.positive("El precio de venta debe ser mayor a cero").max(999_999_999_999),
   moneda: z.enum(["ARS", "USD"]),
-  cotizacion: z.union([num.positive("La cotización debe ser mayor a cero"), z.null()]).optional(),
-  monto_tercero: z.union([num.min(0), z.null()]).optional(),
+  cotizacion: z.union([z.null(), num.positive("La cotización debe ser mayor a cero")]).optional(),
+  monto_tercero: z.union([z.null(), num.min(0)]).optional(),
   dinero_por_agencia: z.boolean().default(true),
   notas: textoCorto(2000),
   pagos: z.array(pago).max(20),
@@ -74,12 +81,58 @@ export async function registrarOperacion(_: Resultado | null, fd: FormData): Pro
   }
   const d = operacion.safeParse(crudo);
   if (!d.success) return { ok: false, error: erroresZod(d.error) };
+  if (d.data.pagos.some((p) => p.tipo === "bien" && p.bien_existente_id)) return { ok: false, error: "Datos inválidos." };
 
   const { data, error } = await supabase.rpc("registrar_operacion", { p: d.data });
   if (error) return { ok: false, error: mensajeError(error) };
 
   revalidatePath("/", "layout");
   redirect(`/operaciones/${data}?nueva=1`);
+}
+
+const correccion = z.object({
+  operacion_id: id,
+  motivo: texto(400, "qué estaba mal"),
+  bien: z.union([
+    z.null(),
+    z.object({
+      origen: z.literal("compra"),
+      costo: num.min(0, "El costo no puede ser negativo").max(999_999_999_999),
+      registrar_egreso: z.boolean().default(false),
+      medio: z.enum(["efectivo", "banco"]).default("efectivo"),
+    }),
+    z.object({
+      origen: z.enum(["consignacion", "intermediacion"]),
+      dueno_id: z.coerce.number({ message: "Elegí el dueño del bien" }).int().positive("Elegí el dueño del bien"),
+      monto_acordado: num.min(0, "El monto acordado no puede ser negativo").max(999_999_999_999),
+    }),
+  ]).optional(),
+  operacion,
+});
+
+/** Corrige una venta: anula la original y registra la correcta en una sola transacción. */
+export async function corregirOperacion(_: Resultado | null, fd: FormData): Promise<Resultado> {
+  const { supabase } = await requerirAdmin();
+  let crudo: unknown;
+  try {
+    const texto = String(fd.get("payload") ?? "");
+    if (texto.length > 100_000) return { ok: false, error: "Datos demasiado grandes." };
+    crudo = JSON.parse(texto);
+  } catch {
+    return { ok: false, error: "Datos inválidos." };
+  }
+  const d = correccion.safeParse(crudo);
+  if (!d.success) return { ok: false, error: erroresZod(d.error) };
+  const { operacion_id, motivo, bien, operacion: datos } = d.data;
+
+  const { data, error } = await supabase.rpc("corregir_operacion", {
+    p_operacion_id: operacion_id,
+    p: { motivo, ...(bien ? { bien } : {}), operacion: datos },
+  });
+  if (error) return { ok: false, error: mensajeError(error) };
+
+  revalidatePath("/", "layout");
+  redirect(`/operaciones/${data}?corregida=1`);
 }
 
 const anulacion = z.object({ operacion_id: id, motivo: texto(500, "el motivo") });

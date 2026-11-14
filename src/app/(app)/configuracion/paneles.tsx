@@ -2,6 +2,7 @@
 
 import { Plus, Save, Eye, EyeOff } from "lucide-react";
 import { Formulario, BotonEnviar } from "@/components/formulario";
+import { EntradaImporte } from "@/components/entradas";
 import { Campo } from "@/components/ui";
 import { guardarConfiguracion, agregarItem, alternarItem } from "./acciones";
 
@@ -42,7 +43,7 @@ export function AgregarItem({ tabla, placeholder }: { tabla: "canales" | "financ
           <select name="comision_base" className="campo w-auto" aria-label="Comisión habitual">
             <option value="">Sin comisión</option><option value="pct_precio">% del precio</option><option value="fijo">Monto fijo</option>
           </select>
-          <input name="comision_valor" inputMode="decimal" placeholder="Valor" className="campo w-24" aria-label="Valor de la comisión" />
+          <EntradaImporte name="comision_valor" placeholder="Valor" className="campo w-24" aria-label="Valor de la comisión" />
         </>
       )}
       <BotonEnviar><Plus className="size-5" aria-hidden /> Agregar</BotonEnviar>

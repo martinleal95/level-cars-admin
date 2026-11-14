@@ -2,25 +2,34 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { Building2, Handshake, Repeat, Save } from "lucide-react";
+import { Building2, Handshake, Repeat, Save, Warehouse, MapPinOff, HandCoins } from "lucide-react";
 import { Formulario, BotonEnviar } from "@/components/formulario";
 import { SelectorFotos } from "@/components/selector-fotos";
+import { EntradaImporte, EntradaPatente } from "@/components/entradas";
 import { Campo } from "@/components/ui";
 import { crearBien } from "../acciones";
 
 type Persona = { id: number; nombre: string };
 const ORIGENES = [
   { valor: "compra", titulo: "Propio", texto: "La agencia lo compró", icono: Building2 },
-  { valor: "consignacion", titulo: "Consignación", texto: "De un dueño, está en la agencia", icono: Handshake },
+  { valor: "consignacion", titulo: "Consignación", texto: "De un dueño particular, se le paga al vender", icono: Handshake },
   { valor: "intermediacion", titulo: "Intermediación", texto: "De otro agenciero, se cobra comisión", icono: Repeat },
 ] as const;
+const UBICACIONES = [
+  { valor: true, titulo: "En la agencia", texto: "Está físicamente en el local", icono: Warehouse },
+  { valor: false, titulo: "Fuera de la agencia", texto: "Se ofrece por redes u otros canales, lo tiene su dueño", icono: MapPinOff },
+] as const;
 
-export function FormularioBien({ personas, hoy }: { personas: Persona[]; hoy: string }) {
-  const [origen, setOrigen] = useState<(typeof ORIGENES)[number]["valor"]>("compra");
+export function FormularioBien({ personas, hoy, vender = false }: { personas: Persona[]; hoy: string; vender?: boolean }) {
+  // Desde una venta lo habitual es un auto que no está en el local.
+  const [origen, setOrigen] = useState<(typeof ORIGENES)[number]["valor"]>(vender ? "intermediacion" : "compra");
+  const [enAgencia, setEnAgencia] = useState(!vender);
   const terceros = origen !== "compra";
 
   return (
     <Formulario accion={crearBien} className="space-y-6">
+      {vender && <input type="hidden" name="vender" value="1" />}
+      <input type="hidden" name="en_agencia" value={String(enAgencia)} />
       <fieldset className="tarjeta p-4 sm:p-6">
         <legend className="sr-only">Origen del bien</legend>
         <p className="mb-3 text-lg font-bold">¿De quién es?</p>
@@ -31,11 +40,27 @@ export function FormularioBien({ personas, hoy }: { personas: Persona[]; hoy: st
                 origen === o.valor ? "bg-naranja-50 ring-naranja-500" : "ring-acero-200 hover:ring-acero-300"
               }`}>
               <input type="radio" name="origen" value={o.valor} checked={origen === o.valor}
-                onChange={() => setOrigen(o.valor)} className="sr-only" />
+                onChange={() => { setOrigen(o.valor); if (o.valor === "compra") setEnAgencia(true); }} className="sr-only" />
               <o.icono className={`mt-0.5 size-6 shrink-0 ${origen === o.valor ? "text-naranja-600" : "text-acero-400"}`} aria-hidden />
               <span>
                 <span className="block font-bold">{o.titulo}</span>
                 <span className="block text-sm text-acero-500">{o.texto}</span>
+              </span>
+            </label>
+          ))}
+        </div>
+        <p className="mt-5 mb-3 text-lg font-bold">¿Dónde está?</p>
+        <div className="grid gap-3 sm:grid-cols-2" role="radiogroup" aria-label="Ubicación del bien">
+          {UBICACIONES.map((u) => (
+            <label key={String(u.valor)}
+              className={`flex cursor-pointer items-start gap-3 rounded-xl p-4 ring-2 transition ${
+                enAgencia === u.valor ? "bg-naranja-50 ring-naranja-500" : "ring-acero-200 hover:ring-acero-300"
+              }`}>
+              <input type="radio" checked={enAgencia === u.valor} onChange={() => setEnAgencia(u.valor)} className="sr-only" />
+              <u.icono className={`mt-0.5 size-6 shrink-0 ${enAgencia === u.valor ? "text-naranja-600" : "text-acero-400"}`} aria-hidden />
+              <span>
+                <span className="block font-bold">{u.titulo}</span>
+                <span className="block text-sm text-acero-500">{u.texto}</span>
               </span>
             </label>
           ))}
@@ -63,7 +88,7 @@ export function FormularioBien({ personas, hoy }: { personas: Persona[]; hoy: st
           <input id="anio" name="anio" type="number" inputMode="numeric" min={1900} max={2100} className="campo" />
         </Campo>
         <Campo etiqueta="Patente o IMEI" htmlFor="dominio">
-          <input id="dominio" name="dominio" className="campo uppercase" maxLength={40} />
+          <EntradaPatente id="dominio" name="dominio" className="campo" placeholder="ABC-123 o AB-123-CD" />
         </Campo>
         <Campo etiqueta="Kilometraje" htmlFor="kilometraje">
           <input id="kilometraje" name="kilometraje" type="number" inputMode="numeric" min={0} className="campo" />
@@ -85,11 +110,11 @@ export function FormularioBien({ personas, hoy }: { personas: Persona[]; hoy: st
         </Campo>
         {!terceros && (
           <Campo etiqueta="Costo de compra" htmlFor="costo" ayuda="Lo que pagó la agencia por el bien.">
-            <input id="costo" name="costo" inputMode="decimal" className="campo cifra" placeholder="0" />
+            <EntradaImporte id="costo" name="costo" className="campo cifra" placeholder="0" />
           </Campo>
         )}
         <Campo etiqueta="Precio publicado" htmlFor="precio_publicado">
-          <input id="precio_publicado" name="precio_publicado" inputMode="decimal" className="campo cifra" placeholder="0" />
+          <EntradaImporte id="precio_publicado" name="precio_publicado" className="campo cifra" placeholder="0" />
         </Campo>
         {!terceros && (
           <div className="flex flex-col justify-end gap-2 sm:col-span-2 lg:col-span-3">
@@ -118,7 +143,7 @@ export function FormularioBien({ personas, hoy }: { personas: Persona[]; hoy: st
           </Campo>
           <Campo etiqueta="Monto que espera recibir" htmlFor="monto_acordado"
             ayuda="Lo que se le paga al dueño cuando se vende.">
-            <input id="monto_acordado" name="monto_acordado" inputMode="decimal" required className="campo cifra" />
+            <EntradaImporte id="monto_acordado" name="monto_acordado" required className="campo cifra" />
           </Campo>
           <Campo etiqueta="Vence el" htmlFor="vence_el"
             ayuda={origen === "consignacion" ? "Si lo dejás vacío se usa el plazo de Configuración." : "Opcional."}>
@@ -133,7 +158,7 @@ export function FormularioBien({ personas, hoy }: { personas: Persona[]; hoy: st
             </select>
           </Campo>
           <Campo etiqueta="Valor de la comisión" htmlFor="comision_valor">
-            <input id="comision_valor" name="comision_valor" inputMode="decimal" className="campo cifra" />
+            <EntradaImporte id="comision_valor" name="comision_valor" className="campo cifra" />
           </Campo>
         </section>
       )}
@@ -151,8 +176,10 @@ export function FormularioBien({ personas, hoy }: { personas: Persona[]; hoy: st
       </section>
 
       <div className="sticky bottom-20 z-10 flex justify-end gap-3 lg:bottom-4">
-        <Link href="/stock" className="btn-secundario">Cancelar</Link>
-        <BotonEnviar className="shadow-lg"><Save className="size-5" aria-hidden /> Guardar bien</BotonEnviar>
+        <Link href={vender ? "/operaciones/nueva" : "/stock"} className="btn-secundario">Cancelar</Link>
+        <BotonEnviar className="shadow-lg">
+          {vender ? <><HandCoins className="size-5" aria-hidden /> Guardar y seguir con la venta</> : <><Save className="size-5" aria-hidden /> Guardar bien</>}
+        </BotonEnviar>
       </div>
     </Formulario>
   );

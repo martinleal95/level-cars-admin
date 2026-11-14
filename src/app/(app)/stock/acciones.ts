@@ -39,6 +39,7 @@ const esquemaNuevo = z
     comision_base: z.preprocess((v) => (v === "" ? null : v), base.nullable().optional()),
     comision_valor: montoOpcional,
     vence_el: fechaISO,
+    en_agencia: z.preprocess((v) => v !== "false" && v !== false, z.boolean()),
   })
   .superRefine((d, ctx) => {
     if (d.origen !== "compra") {
@@ -64,6 +65,8 @@ export async function crearBien(_: Resultado | null, fd: FormData): Promise<Resu
   const fotos = archivos.length ? await guardarFotos(supabase, Number(data), archivos) : null;
 
   revalidatePath("/stock");
+  // Si se cargó desde una venta, vuelve directo a la venta con el bien elegido.
+  if (fd.get("vender") === "1") redirect(`/operaciones/nueva?bien=${data}`);
   redirect(`/stock/${data}${fotos?.error ? "?fotos=error" : ""}`);
 }
 
@@ -71,6 +74,7 @@ const esquemaEditar = z.object({
   id,
   ...datosBien,
   costo: montoOpcional,
+  en_agencia: z.preprocess((v) => v !== "false" && v !== false, z.boolean()),
 });
 
 export async function editarBien(_: Resultado | null, fd: FormData): Promise<Resultado> {
@@ -201,6 +205,51 @@ export async function editarAcuerdo(_: Resultado | null, fd: FormData): Promise<
 
   revalidatePath(`/stock/${bien_id}`);
   return { ok: true, mensaje: "Acuerdo actualizado." };
+}
+
+const esquemaOrigen = z
+  .object({
+    bien_id: id,
+    origen: z.enum(["compra", "consignacion", "intermediacion"], { message: "Elegí el origen" }),
+    costo: montoOpcional,
+    registrar_egreso: casilla,
+    medio: z.enum(["efectivo", "banco"]).default("efectivo"),
+    dueno_id: idOpcional,
+    monto_acordado: montoOpcional,
+  })
+  .superRefine((d, ctx) => {
+    if (d.origen !== "compra") {
+      if (!d.dueno_id) ctx.addIssue({ code: "custom", message: "Elegí el dueño del bien" });
+      if (d.monto_acordado == null) ctx.addIssue({ code: "custom", message: "Indicá el monto acordado con el dueño" });
+    }
+  });
+
+/** Corrige de quién es un bien que está en stock (propio / consignación / intermediación). */
+export async function cambiarOrigenBien(_: Resultado | null, fd: FormData): Promise<Resultado> {
+  const { supabase } = await requerirAdmin();
+  const d = esquemaOrigen.safeParse(datosFormulario(fd));
+  if (!d.success) return { ok: false, error: erroresZod(d.error) };
+
+  const { error } = await supabase.rpc("cambiar_origen_bien", { p: d.data });
+  if (error) return { ok: false, error: mensajeError(error) };
+
+  revalidatePath("/", "layout");
+  return { ok: true, mensaje: "Origen corregido." };
+}
+
+/** Borra un bien cargado por error (solo si no tiene ventas, reservas ni gastos). */
+export async function borrarBien(_: Resultado | null, fd: FormData): Promise<Resultado> {
+  const { supabase } = await requerirAdmin();
+  const bienId = id.safeParse(fd.get("bien_id"));
+  if (!bienId.success) return { ok: false, error: "Bien inválido." };
+
+  const { data, error } = await supabase.rpc("borrar_bien", { p_bien_id: bienId.data });
+  if (error) return { ok: false, error: mensajeError(error) };
+  const rutas = (data ?? []) as string[];
+  if (rutas.length) await supabase.storage.from("fotos-bienes").remove(rutas);
+
+  revalidatePath("/", "layout");
+  redirect("/stock");
 }
 
 // ---------------- Fotos ----------------

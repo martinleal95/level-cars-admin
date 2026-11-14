@@ -15,6 +15,7 @@ const VARIANTE = {
   peligro: "btn-peligro",
   aviso: "btn-aviso",
   secundario: "btn-secundario",
+  fantasma: "btn-fantasma",
 } as const;
 type Variante = keyof typeof VARIANTE;
 

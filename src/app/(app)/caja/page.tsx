@@ -4,7 +4,7 @@ import { Wallet, Landmark, Banknote } from "lucide-react";
 import { requerirAdmin } from "@/lib/auth";
 import { dinero, fecha, hoyISO, type Moneda } from "@/lib/formato";
 import { Encabezado, Vacio, Kpi } from "@/components/ui";
-import { BotonesMovimiento, BotonPagado, BotonBorrar } from "./paneles";
+import { BotonesMovimiento, BotonPagado, BotonBorrar, BotonEditar } from "./paneles";
 
 export const metadata: Metadata = { title: "Caja" };
 
@@ -17,7 +17,7 @@ export default async function PaginaCaja({ searchParams }: { searchParams: Promi
   const mesValido = mes && /^\d{4}-\d{2}$/.test(mes) ? mes : hoy.slice(0, 7);
 
   let consulta = supabase.from("movimientos")
-    .select("id, fecha, tipo, monto, moneda, medio, descripcion, pendiente, automatico, anulado, operacion_id, bien_id, motivo:motivos_caja(nombre, codigo), persona:personas(nombre)")
+    .select("id, fecha, tipo, monto, moneda, medio, descripcion, pendiente, automatico, anulado, operacion_id, bien_id, motivo_id, persona_id, motivo:motivos_caja(nombre, codigo), persona:personas(nombre)")
     .eq("anulado", false).order("fecha", { ascending: false }).order("id", { ascending: false }).limit(500);
   if (pendientes) {
     consulta = consulta.eq("pendiente", true);
@@ -30,7 +30,7 @@ export default async function PaginaCaja({ searchParams }: { searchParams: Promi
   const [{ data: movs }, { data: saldos }, { data: motivos }, { data: personas }, { count: cantPend }] = await Promise.all([
     consulta,
     supabase.from("v_saldo_caja").select("*"),
-    supabase.from("motivos_caja").select("id, nombre, tipo, es_gasto_fijo").eq("activo", true).is("codigo", null).order("nombre"),
+    supabase.from("motivos_caja").select("id, nombre, tipo, es_gasto_fijo, activo").is("codigo", null).order("nombre"),
     supabase.from("personas").select("id, nombre").order("nombre"),
     supabase.from("movimientos").select("id", { count: "exact", head: true }).eq("pendiente", true).eq("anulado", false),
   ]);
@@ -110,6 +110,10 @@ export default async function PaginaCaja({ searchParams }: { searchParams: Promi
                 {(mv.pendiente || !mv.automatico) && (
                   <div className="mt-2 flex justify-end gap-2 empty:hidden">
                     {mv.pendiente && !((mv.motivo as unknown as Nombre)?.codigo === "cobro_venta" && mv.operacion_id) && <BotonPagado id={mv.id} tipo={mv.tipo} />}
+                    {!mv.automatico && (
+                      <BotonEditar motivos={motivos ?? []} personas={personas ?? []} hoy={hoy}
+                        mov={{ id: mv.id, tipo: mv.tipo, motivo_id: mv.motivo_id, monto: Number(mv.monto), moneda: mv.moneda, medio: mv.medio, fecha: mv.fecha, descripcion: mv.descripcion, persona_id: mv.persona_id }} />
+                    )}
                     {!mv.automatico && <BotonBorrar id={mv.id} />}
                   </div>
                 )}

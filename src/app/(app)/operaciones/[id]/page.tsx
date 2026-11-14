@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { CheckCircle2, Car } from "lucide-react";
+import { CheckCircle2, Car, PencilLine } from "lucide-react";
 import { requerirAdmin } from "@/lib/auth";
 import { dinero, fecha, etiquetas, type Moneda } from "@/lib/formato";
 import { Encabezado, Seccion, Dato, InsigniaOrigen } from "@/components/ui";
@@ -13,18 +13,20 @@ type Nombre = { nombre: string } | null;
 
 export default async function PaginaOperacion({
   params, searchParams,
-}: { params: Promise<{ id: string }>; searchParams: Promise<{ nueva?: string }> }) {
+}: { params: Promise<{ id: string }>; searchParams: Promise<{ nueva?: string; corregida?: string }> }) {
   const { id: idTexto } = await params;
-  const { nueva } = await searchParams;
+  const { nueva, corregida } = await searchParams;
   const opId = Number(idTexto);
   if (!Number.isSafeInteger(opId) || opId <= 0) notFound();
 
   const { supabase } = await requerirAdmin();
-  const [{ data: o }, { data: pagos }, { data: comisiones }, { data: movs }] = await Promise.all([
+  const [{ data: o }, { data: pagos }, { data: comisiones }, { data: movs }, { data: rastro }, { data: reemplaza }] = await Promise.all([
     supabase.from("v_operaciones").select("*").eq("id", opId).maybeSingle(),
     supabase.from("operacion_pagos").select("*, financiera:financieras(nombre), bien:bienes!operacion_pagos_bien_recibido_id_fkey(id, marca, modelo)").eq("operacion_id", opId).order("id"),
     supabase.from("operacion_comisiones").select("*, persona:personas(nombre), financiera:financieras(nombre)").eq("operacion_id", opId).order("id"),
     supabase.from("movimientos").select("id, tipo, monto, moneda, pendiente, anulado, descripcion, motivo:motivos_caja(nombre)").eq("operacion_id", opId).order("id"),
+    supabase.from("operaciones").select("corregida_por, motivo_anulacion").eq("id", opId).maybeSingle(),
+    supabase.from("operaciones").select("id").eq("corregida_por", opId).maybeSingle(),
   ]);
   if (!o) notFound();
   const m = o.moneda as Moneda;
@@ -46,13 +48,32 @@ export default async function PaginaOperacion({
           <CheckCircle2 className="size-6" aria-hidden /> Venta registrada. Los movimientos de caja ya se generaron.
         </div>
       )}
+      {corregida && !o.anulada && (
+        <div role="status" className="mb-5 flex items-center gap-3 rounded-xl bg-emerald-600 px-4 py-3 font-semibold text-white shadow-lg">
+          <CheckCircle2 className="size-6 shrink-0" aria-hidden />
+          <span>
+            Corrección guardada. La caja y la ganancia ya están actualizadas.
+            {(movs ?? []).some((mv) => mv.pendiente && !mv.anulado) && <span className="block text-sm font-normal">Revisá abajo los movimientos que quedaron pendientes.</span>}
+          </span>
+        </div>
+      )}
       <Encabezado titulo={`${o.marca} ${o.modelo}`} descripcion={`Operación #${o.id} · ${fecha(o.fecha)}`} volver={{ href: "/operaciones", label: "Operaciones" }}>
         <Link href={`/stock/${o.bien_id}`} className="btn-secundario"><Car className="size-5" aria-hidden /> Ver bien</Link>
+        {!o.anulada && <Link href={`/operaciones/${o.id}/corregir`} className="btn-secundario"><PencilLine className="size-5" aria-hidden /> Corregir</Link>}
         {!o.anulada && <BotonAnular operacionId={o.id} />}
       </Encabezado>
 
       {o.anulada && (
-        <p className="mb-5 rounded-xl bg-red-50 px-4 py-3 text-sm font-semibold text-red-700 ring-1 ring-red-200">Esta operación está anulada.</p>
+        <p className="mb-5 rounded-xl bg-red-50 px-4 py-3 text-sm font-semibold text-red-700 ring-1 ring-red-200">
+          {rastro?.corregida_por ? "Esta operación se corrigió y quedó reemplazada. " : "Esta operación está anulada. "}
+          {rastro?.motivo_anulacion && <span className="font-normal">{rastro.motivo_anulacion}. </span>}
+          {rastro?.corregida_por && <Link href={`/operaciones/${rastro.corregida_por}`} className="underline">Ver la operación correcta #{rastro.corregida_por} →</Link>}
+        </p>
+      )}
+      {reemplaza && !o.anulada && (
+        <p className="mb-5 text-sm text-acero-500">
+          Reemplaza a la <Link href={`/operaciones/${reemplaza.id}`} className="font-semibold text-naranja-600 hover:underline">operación #{reemplaza.id}</Link>, que se cargó con errores.
+        </p>
       )}
 
       <div className="grid gap-5 lg:grid-cols-3">

@@ -1,50 +1,57 @@
 "use client";
 
 import { useState } from "react";
-import { ArrowDownCircle, ArrowUpCircle, Check, Trash2 } from "lucide-react";
+import { ArrowDownCircle, ArrowUpCircle, Check, Trash2, Pencil } from "lucide-react";
 import { Formulario, BotonEnviar, Dialogo } from "@/components/formulario";
+import { EntradaImporte } from "@/components/entradas";
 import { Campo } from "@/components/ui";
-import { registrarMovimiento, marcarPagado, borrarMovimiento } from "./acciones";
+import { registrarMovimiento, marcarPagado, borrarMovimiento, editarMovimiento } from "./acciones";
 
-type Motivo = { id: number; nombre: string; tipo: "ingreso" | "egreso"; es_gasto_fijo: boolean };
+type Motivo = { id: number; nombre: string; tipo: "ingreso" | "egreso"; es_gasto_fijo: boolean; activo: boolean };
 type Persona = { id: number; nombre: string };
 
-function FormMovimiento({ tipo, motivos, personas, hoy, cerrar }: {
-  tipo: "ingreso" | "egreso"; motivos: Motivo[]; personas: Persona[]; hoy: string; cerrar: () => void;
+export type MovimientoEditable = {
+  id: number; tipo: "ingreso" | "egreso"; motivo_id: number; monto: number; moneda: string; medio: string;
+  fecha: string; descripcion: string | null; persona_id: number | null;
+};
+
+function FormMovimiento({ tipo, motivos, personas, hoy, cerrar, mov }: {
+  tipo: "ingreso" | "egreso"; motivos: Motivo[]; personas: Persona[]; hoy: string; cerrar: () => void; mov?: MovimientoEditable;
 }) {
   const [t] = useState(tipo);
   return (
-    <Formulario accion={registrarMovimiento} alGuardar={cerrar} className="space-y-4">
+    <Formulario accion={mov ? editarMovimiento : registrarMovimiento} alGuardar={mov ? undefined : cerrar} className="space-y-4">
       <input type="hidden" name="tipo" value={t} />
+      {mov && <input type="hidden" name="movimiento_id" value={mov.id} />}
       <Campo etiqueta="Motivo" htmlFor="mv_motivo">
-        <select id="mv_motivo" name="motivo_id" required defaultValue="" className="campo">
+        <select id="mv_motivo" name="motivo_id" required defaultValue={mov?.motivo_id ?? ""} className="campo">
           <option value="" disabled>Elegí</option>
-          {motivos.filter((m) => m.tipo === t).map((m) => (
+          {motivos.filter((m) => m.tipo === t && (m.activo || m.id === mov?.motivo_id)).map((m) => (
             <option key={m.id} value={m.id}>{m.nombre}{m.es_gasto_fijo ? " (gasto fijo)" : ""}</option>
           ))}
         </select>
       </Campo>
       <div className="grid grid-cols-[1fr_auto] gap-3">
-        <Campo etiqueta="Monto" htmlFor="mv_monto"><input id="mv_monto" name="monto" inputMode="decimal" required className="campo cifra" /></Campo>
+        <Campo etiqueta="Monto" htmlFor="mv_monto"><EntradaImporte id="mv_monto" name="monto" required inicial={mov?.monto} className="campo cifra" /></Campo>
         <Campo etiqueta="Moneda" htmlFor="mv_moneda">
-          <select id="mv_moneda" name="moneda" className="campo"><option value="ARS">$</option><option value="USD">US$</option></select>
+          <select id="mv_moneda" name="moneda" defaultValue={mov?.moneda ?? "ARS"} className="campo"><option value="ARS">$</option><option value="USD">US$</option></select>
         </Campo>
       </div>
       <div className="grid grid-cols-2 gap-3">
         <Campo etiqueta="Medio" htmlFor="mv_medio">
-          <select id="mv_medio" name="medio" className="campo"><option value="efectivo">Efectivo</option><option value="banco">Banco</option></select>
+          <select id="mv_medio" name="medio" defaultValue={mov?.medio ?? "efectivo"} className="campo"><option value="efectivo">Efectivo</option><option value="banco">Banco</option></select>
         </Campo>
-        <Campo etiqueta="Fecha" htmlFor="mv_fecha"><input id="mv_fecha" name="fecha" type="date" defaultValue={hoy} max={hoy} className="campo" /></Campo>
+        <Campo etiqueta="Fecha" htmlFor="mv_fecha"><input id="mv_fecha" name="fecha" type="date" defaultValue={mov?.fecha ?? hoy} max={hoy} className="campo" /></Campo>
       </div>
       <Campo etiqueta="Persona (opcional)" htmlFor="mv_persona">
-        <select id="mv_persona" name="persona_id" defaultValue="" className="campo">
+        <select id="mv_persona" name="persona_id" defaultValue={mov?.persona_id ?? ""} className="campo">
           <option value="">Ninguna</option>
           {personas.map((p) => <option key={p.id} value={p.id}>{p.nombre}</option>)}
         </select>
       </Campo>
-      <Campo etiqueta="Detalle" htmlFor="mv_desc"><input id="mv_desc" name="descripcion" maxLength={500} className="campo" /></Campo>
+      <Campo etiqueta="Detalle" htmlFor="mv_desc"><input id="mv_desc" name="descripcion" maxLength={500} defaultValue={mov?.descripcion ?? ""} className="campo" /></Campo>
       <BotonEnviar variante={t === "ingreso" ? "exito" : "peligro"} className="w-full">
-        Registrar {t}
+        {mov ? "Guardar cambios" : `Registrar ${t}`}
       </BotonEnviar>
     </Formulario>
   );
@@ -60,6 +67,14 @@ export function BotonesMovimiento(props: { motivos: Motivo[]; personas: Persona[
         {(cerrar) => <FormMovimiento tipo="egreso" cerrar={cerrar} {...props} />}
       </Dialogo>
     </>
+  );
+}
+
+export function BotonEditar({ mov, ...props }: { mov: MovimientoEditable; motivos: Motivo[]; personas: Persona[]; hoy: string }) {
+  return (
+    <Dialogo boton="Editar" titulo={`Editar ${mov.tipo}`} variante="secundario" icono={<Pencil className="size-4" aria-hidden />}>
+      {(cerrar) => <FormMovimiento tipo={mov.tipo} mov={mov} cerrar={cerrar} {...props} />}
+    </Dialogo>
   );
 }
 

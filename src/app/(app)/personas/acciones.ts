@@ -35,3 +35,23 @@ export async function guardarPersona(_: Resultado | null, fd: FormData): Promise
   revalidatePath("/personas");
   return { ok: true, mensaje: personaId ? "Datos actualizados." : `${d.data.nombre} fue agregado.` };
 }
+
+export async function borrarPersona(_: Resultado | null, fd: FormData): Promise<Resultado> {
+  const { supabase } = await requerirAdmin();
+  const personaId = id.safeParse(fd.get("persona_id"));
+  if (!personaId.success) return { ok: false, error: "Persona inválida." };
+
+  const { data, error } = await supabase.from("personas").delete().eq("id", personaId.data).select("id");
+  if (error) {
+    return {
+      ok: false,
+      error: error.code === "23503"
+        ? "No se puede borrar: tiene ventas, bienes, reservas o movimientos a su nombre."
+        : mensajeError(error),
+    };
+  }
+  if (!data?.length) return { ok: false, error: "La persona ya no existe." };
+
+  revalidatePath("/personas");
+  return { ok: true };
+}

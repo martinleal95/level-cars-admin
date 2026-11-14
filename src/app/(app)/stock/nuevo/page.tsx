@@ -6,16 +6,17 @@ import { FormularioBien } from "./formulario";
 
 export const metadata: Metadata = { title: "Cargar bien" };
 
-export default async function PaginaNuevoBien() {
+export default async function PaginaNuevoBien({ searchParams }: { searchParams: Promise<{ vender?: string }> }) {
   const { supabase } = await requerirAdmin();
-  const { data: personas } = await supabase
-    .from("personas").select("id, nombre").or("es_dueno.eq.true,es_agenciero.eq.true").order("nombre");
+  const { vender } = await searchParams;
+  const { data: personas } = await supabase.from("personas").select("id, nombre").order("nombre");
 
   return (
     <>
-      <Encabezado titulo="Cargar bien" descripcion="Auto, moto, celular u otro bien que entra al stock."
-        volver={{ href: "/stock", label: "Stock" }} />
-      <FormularioBien personas={personas ?? []} hoy={hoyISO()} />
+      <Encabezado titulo={vender ? "Cargar el bien que se vende" : "Cargar bien"}
+        descripcion={vender ? "Cargá los datos mínimos y al guardar volvés a la venta con el bien ya elegido." : "Auto, moto, celular u otro bien, esté en la agencia o no."}
+        volver={vender ? { href: "/operaciones/nueva", label: "Nueva venta" } : { href: "/stock", label: "Stock" }} />
+      <FormularioBien personas={personas ?? []} hoy={hoyISO()} vender={!!vender} />
     </>
   );
 }

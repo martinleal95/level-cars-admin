@@ -3,7 +3,7 @@ import Link from "next/link";
 import { Users, Phone, Search } from "lucide-react";
 import { requerirAdmin } from "@/lib/auth";
 import { Encabezado, Vacio } from "@/components/ui";
-import { NuevaPersona, EditarPersona, type Persona } from "./formulario";
+import { NuevaPersona, EditarPersona, BorrarPersona, type Persona } from "./formulario";
 
 export const metadata: Metadata = { title: "Personas" };
 
@@ -82,6 +82,7 @@ export default async function PaginaPersonas({ searchParams }: { searchParams: P
                     <a href={wa} target="_blank" rel="noopener noreferrer" className="btn-exito flex-1">WhatsApp</a>
                   )}
                   <EditarPersona persona={p} />
+                  <span className="ml-auto"><BorrarPersona persona={p} /></span>
                 </div>
               </li>
             );

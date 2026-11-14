@@ -114,7 +114,10 @@ for (const dispositivo of ["escritorio", "celular"]) {
     await page.fill("#modelo", `Focus E2E ${sufijo}`);
     await page.fill("#anio", "2018");
     await page.selectOption("#moneda", "ARS");
-    await page.fill("#costo", "7.000.000");
+    await page.fill("#costo", "7000000");
+    if ((await page.inputValue("#costo")) !== "7.000.000") throw new Error("El importe no se formateó con puntos");
+    await page.fill("#dominio", "ab123cd");
+    if ((await page.inputValue("#dominio")) !== "AB-123-CD") throw new Error("La patente no se formateó");
     await page.fill("#precio_publicado", "10.000.000");
     await page.check("input[name=registrar_egreso]");
     await page.setInputFiles("input[name=fotos]", [
@@ -164,6 +167,7 @@ for (const dispositivo of ["escritorio", "celular"]) {
     await page.waitForURL(/\/operaciones\/\d+\?nueva=1/);
     await page.getByText("Venta registrada").waitFor();
     await page.getByText("$ 2.610.000").first().waitFor();
+    const opFocus = new globalThis.URL(page.url()).pathname.split("/").pop();
     ok("venta registrada con ganancia neta $ 2.610.000");
     await captura(page, "operacion");
 
@@ -203,7 +207,7 @@ for (const dispositivo of ["escritorio", "celular"]) {
     await page.getByRole("button", { name: "Efectivo" }).last().click();
     const segundoPago = page.locator("li", { has: page.locator("[id^=pm_]") }).nth(1);
     await segundoPago.getByRole("button", { name: "Completar saldo" }).click();
-    if ((await segundoPago.locator("[id^=pm_]").inputValue()) !== "7000") throw new Error("Completar saldo no calculó US$ 7000");
+    if ((await segundoPago.locator("[id^=pm_]").inputValue()) !== "7.000") throw new Error("Completar saldo no calculó US$ 7000");
     await page.getByText("Los pagos cubren el precio").waitFor();
     await page.getByRole("button", { name: "Confirmar venta" }).click();
     await page.waitForURL(/\/operaciones\/\d+\?nueva=1/);
@@ -212,11 +216,119 @@ for (const dispositivo of ["escritorio", "celular"]) {
     ok("venta en dólares con pago en pesos (ganancia US$ 2.000)");
     await captura(page, "operacion-mixta");
 
+    // 11. Corregir la primera venta: el Focus era en consignación, no propio
+    await page.goto(`${URL}/operaciones/${opFocus}`);
+    await page.getByRole("link", { name: "Corregir" }).click();
+    await page.waitForURL(/\/corregir$/);
+    if ((await page.locator("#precio").inputValue()) !== "10.000.000") throw new Error("La corrección no trajo el precio original");
+    await page.getByText("ya está cargado en el stock y se conserva").waitFor();
+    await page.selectOption("#origen_nuevo", "consignacion");
+    await page.selectOption("#dueno_nuevo", { label: `Cliente E2E ${sufijo}` });
+    await page.fill("#acordado_nuevo", "8.000.000");
+    // 10M - 8M al dueño - 0,1M de gastos = 1,9M; comisión 10% = 190.000 -> 1.710.000
+    await page.getByText("$ 1.710.000").first().waitFor();
+    if (!(await page.getByRole("button", { name: "Guardar corrección" }).isDisabled())) throw new Error("Dejó corregir sin motivo");
+    await page.fill("#acordado_nuevo", "8000000");
+    if ((await page.inputValue("#acordado_nuevo")) !== "8.000.000") throw new Error("El monto acordado no se formateó con puntos");
+    await page.fill("#motivo", "El auto era en consignación");
+    await captura(page, "corregir-venta");
+    await page.getByRole("button", { name: "Guardar corrección" }).click();
+    await page.waitForURL(/\/operaciones\/\d+\?corregida=1/);
+    await page.getByText("Corrección guardada").waitFor();
+    await page.getByText("$ 1.710.000").first().waitFor();
+    await page.getByText("Pago al dueño").first().waitFor();
+    await captura(page, "operacion-corregida");
+    await page.getByRole("link", { name: `operación #${opFocus}` }).click();
+    await page.getByText("Esta operación se corrigió y quedó reemplazada.").waitFor();
+    ok("venta corregida: pasó a consignación, ganancia $ 1.710.000, la original quedó anulada y enlazada");
+    await page.goto(`${URL}/stock?q=CB190+E2E+${sufijo}`);
+    if ((await page.getByText(`Honda CB190 E2E ${sufijo}`).count()) !== 1) throw new Error("La moto recibida se duplicó o se perdió al corregir");
+    ok("la moto recibida como parte de pago se conservó al corregir");
+
+    // 12. Vender un auto que no está en la agencia, cargándolo desde la venta
+    await page.goto(`${URL}/operaciones/nueva`);
+    await page.getByRole("link", { name: "cargalo acá" }).click();
+    await page.waitForURL(/stock\/nuevo\?vender=1/);
+    await page.fill("#marca", "Fiat");
+    await page.fill("#modelo", `Cronos E2E ${sufijo}`);
+    await page.selectOption("#moneda", "ARS");
+    await page.selectOption("#dueno_id", { label: `Vendedor E2E ${sufijo}` });
+    await page.fill("#monto_acordado", "9.000.000");
+    await captura(page, "bien-fuera-de-agencia");
+    await page.getByRole("button", { name: "Guardar y seguir con la venta" }).click();
+    await page.waitForURL(/operaciones\/nueva\?bien=\d+/);
+    await page.getByText("Intermediación").first().waitFor();
+    await page.selectOption("#cliente", { label: `Cliente E2E ${sufijo}` });
+    await page.fill("#precio", "9.500.000");
+    await page.getByRole("button", { name: "Completar saldo" }).click();
+    await page.getByText("Los pagos cubren el precio").waitFor();
+    await page.getByRole("button", { name: "Confirmar venta" }).click();
+    await page.waitForURL(/\/operaciones\/\d+\?nueva=1/);
+    await page.getByText("$ 500.000").first().waitFor();
+    ok("auto fuera de la agencia cargado desde la venta y vendido (ganancia $ 500.000)");
+
+    // 13. Bien cargado por error: se marca fuera de la agencia, se cambia el origen y se borra
+    await page.goto(`${URL}/stock/nuevo`);
+    await page.fill("#marca", "Error");
+    await page.fill("#modelo", `Borrar E2E ${sufijo}`);
+    await page.selectOption("#moneda", "ARS");
+    await page.fill("#costo", "1.000.000");
+    await page.getByText("Fuera de la agencia").click();
+    await page.getByRole("button", { name: "Guardar bien" }).click();
+    await page.waitForURL(/\/stock\/\d+$/);
+    await page.getByText("Fuera de la agencia").first().waitFor();
+    await page.getByText("Corregir de quién es").click();
+    await page.selectOption("#o_origen", "consignacion");
+    await page.selectOption("#o_dueno", { label: `Cliente E2E ${sufijo}` });
+    await page.fill("#o_monto", "900.000");
+    await page.getByRole("button", { name: "Guardar origen" }).click();
+    await page.getByText("Origen corregido.").waitFor();
+    await page.getByText("Espera recibir").waitFor();
+    await page.goto(`${URL}/stock?ver=fuera`);
+    await page.getByText(`Borrar E2E ${sufijo}`).waitFor();
+    await page.getByText(`Borrar E2E ${sufijo}`).click();
+    await page.waitForURL(/\/stock\/\d+$/);
+    await page.getByRole("button", { name: "Borrar bien" }).click();
+    await page.getByRole("button", { name: "Borrar definitivamente" }).click();
+    await page.waitForURL(/\/stock$/);
+    if (await page.getByText(`Borrar E2E ${sufijo}`).count()) throw new Error("El bien borrado sigue en el stock");
+    ok("origen de un bien corregido y bien cargado por error borrado");
+
+    // 14. Caja: editar un movimiento manual. Personas: borrar una sin uso; una con ventas no se borra
+    await page.goto(`${URL}/caja`);
+    await page.getByRole("button", { name: "Egreso", exact: true }).click();
+    let dlg = page.locator("dialog[open]");
+    await dlg.locator("#mv_motivo").selectOption({ index: 1 });
+    await dlg.locator("#mv_monto").fill("12.345");
+    await dlg.locator("#mv_desc").fill(`Gasto E2E ${sufijo}`);
+    await dlg.getByRole("button", { name: "Registrar egreso" }).click();
+    const fila = page.locator("li", { hasText: `Gasto E2E ${sufijo}` });
+    await fila.getByRole("button", { name: "Editar" }).click();
+    dlg = page.locator("dialog[open]");
+    if ((await dlg.locator("#mv_monto").inputValue()) !== "12.345") throw new Error("La edición no trajo el monto");
+    await dlg.locator("#mv_monto").fill("54.321");
+    await dlg.getByRole("button", { name: "Guardar cambios" }).click();
+    await fila.getByText("$ 54.321").waitFor();
+    ok("movimiento manual de caja editado");
+    await page.goto(`${URL}/personas`);
+    await page.getByRole("button", { name: "Agregar persona" }).click();
+    dlg = page.locator("dialog[open]");
+    await dlg.locator("input[name=nombre]").fill(`Borrable E2E ${sufijo}`);
+    await dlg.getByRole("button", { name: "Guardar" }).click();
+    await page.getByText(`Borrable E2E ${sufijo}`).first().waitFor();
+    await page.getByRole("button", { name: `Borrar a Borrable E2E ${sufijo}` }).click();
+    await page.locator("dialog[open]").getByRole("button", { name: "Borrar definitivamente" }).click();
+    await page.getByText(`Borrable E2E ${sufijo}`).first().waitFor({ state: "detached" });
+    await page.getByRole("button", { name: `Borrar a Cliente E2E ${sufijo}` }).click();
+    await page.locator("dialog[open]").getByRole("button", { name: "Borrar definitivamente" }).click();
+    await page.getByText("No se puede borrar: tiene ventas").waitFor();
+    ok("personas: se borra la que no tiene uso y se protege la que tiene ventas");
+
     await page.goto(`${URL}/configuracion`);
     await page.getByText("Plazos y alertas").waitFor();
     ok("configuración");
   } else {
-    for (const ruta of ["/", "/stock", "/operaciones", "/caja", "/reportes", "/operaciones/nueva", "/personas", "/configuracion"]) {
+    for (const ruta of ["/", "/stock", "/operaciones", "/caja", "/reportes", "/operaciones/nueva", "/personas", "/configuracion", "/stock/nuevo?vender=1"]) {
       await page.goto(`${URL}${ruta}`);
       await page.waitForLoadState("networkidle");
       const ancho = await page.evaluate(() => document.documentElement.scrollWidth);

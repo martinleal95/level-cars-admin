@@ -1,13 +1,14 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { HandCoins, Pencil, FileText } from "lucide-react";
+import { HandCoins, Pencil, FileText, Shuffle } from "lucide-react";
 import { requerirAdmin } from "@/lib/auth";
 import { enlacesFotos } from "@/lib/fotos";
 import { dinero, fecha, etiquetas, hoyISO, type Moneda } from "@/lib/formato";
 import { Encabezado, Seccion, Dato, InsigniaEstado, InsigniaOrigen } from "@/components/ui";
 import {
   BotonReservar, BotonCerrarReserva, BotonRetirar, SubirFoto, BorrarFoto, FormularioGasto, FormularioEditar, FormularioAcuerdo,
+  FormularioOrigen, BotonBorrarBien,
 } from "./paneles";
 
 export const metadata: Metadata = { title: "Detalle del bien" };
@@ -22,7 +23,7 @@ export default async function PaginaBien({ params, searchParams }: {
 
   const { supabase } = await requerirAdmin();
   const [{ data: bien }, { data: fotosDb }, { data: acuerdo }, { data: reserva }, { data: gastos },
-    { data: operacion }, { data: clientes }, { data: motivos }, { data: cfg }] = await Promise.all([
+    { data: operacion }, { data: clientes }, { data: motivos }, { data: cfg }, { count: ventas }] = await Promise.all([
     supabase.from("v_stock").select("*").eq("id", bienId).maybeSingle(),
     supabase.from("bien_fotos").select("id, ruta").eq("bien_id", bienId).order("orden"),
     supabase.from("acuerdos_terceros").select("*, dueno:personas(nombre, telefono)").eq("bien_id", bienId).maybeSingle(),
@@ -35,6 +36,7 @@ export default async function PaginaBien({ params, searchParams }: {
     supabase.from("motivos_caja").select("id, nombre").eq("tipo", "egreso").eq("es_gasto_fijo", false).eq("activo", true)
       .is("codigo", null).order("nombre"),
     supabase.from("configuracion").select("dias_reserva").eq("id", 1).single(),
+    supabase.from("operaciones").select("id", { count: "exact", head: true }).eq("bien_id", bienId),
   ]);
 
   if (!bien) notFound();
@@ -72,7 +74,8 @@ export default async function PaginaBien({ params, searchParams }: {
             <div className="mb-4 flex flex-wrap gap-2">
               <InsigniaEstado estado={bien.estado} />
               <InsigniaOrigen origen={bien.origen} />
-              <span className="insignia bg-acero-100 text-grafito-700">{bien.dias_en_stock} días en la agencia</span>
+              {!bien.en_agencia && <span className="insignia bg-sky-100 text-sky-800">Fuera de la agencia</span>}
+              <span className="insignia bg-acero-100 text-grafito-700">{bien.dias_en_stock} {bien.en_agencia ? "días en la agencia" : "días ofrecido"}</span>
             </div>
             <dl className="grid grid-cols-2 gap-4 sm:grid-cols-4">
               <Dato etiqueta="Precio publicado" destacado>{bien.precio_publicado ? dinero(bien.precio_publicado, m) : "—"}</Dato>
@@ -144,6 +147,26 @@ export default async function PaginaBien({ params, searchParams }: {
                 <FormularioEditar bien={bien} />
               </div>
             </details>
+          )}
+
+          {activo && bien.origen !== "parte_pago" && (
+            <details className="tarjeta group p-4 sm:p-6">
+              <summary className="flex cursor-pointer list-none items-center gap-2 text-lg font-bold [&::-webkit-details-marker]:hidden">
+                <Shuffle className="size-5 text-acero-400" aria-hidden /> Corregir de quién es
+              </summary>
+              <p className="mt-2 text-sm text-acero-500">Si lo cargaste como propio y era en consignación o de otra agencia (o al revés), cambialo acá.</p>
+              <div className="mt-4">
+                <FormularioOrigen bienId={bien.id} origen={bien.origen} moneda={m} costo={Number(bien.costo)}
+                  duenoId={bien.dueno_id} montoAcordado={bien.monto_acordado != null ? Number(bien.monto_acordado) : null} personas={clientes ?? []} />
+              </div>
+            </details>
+          )}
+
+          {bien.estado === "en_stock" && bien.origen !== "parte_pago" && !ventas && (
+            <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl px-4 py-3 ring-1 ring-acero-200">
+              <p className="text-sm text-acero-500">¿Lo cargaste por error? Podés borrarlo mientras no tenga ventas, reservas ni gastos.</p>
+              <BotonBorrarBien bienId={bien.id} />
+            </div>
           )}
         </div>
 

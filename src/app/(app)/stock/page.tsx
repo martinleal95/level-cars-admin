@@ -12,6 +12,7 @@ const FILTROS = [
   { valor: "disponibles", label: "Disponibles" },
   { valor: "reservado", label: "Reservados" },
   { valor: "terceros", label: "De terceros" },
+  { valor: "fuera", label: "Fuera de la agencia" },
   { valor: "vendido", label: "Vendidos" },
   { valor: "retirado", label: "Retirados" },
 ] as const;
@@ -22,7 +23,7 @@ type Fila = {
   id: number; tipo: keyof typeof ICONOS; marca: string; modelo: string; version: string | null;
   anio: number | null; dominio: string | null; kilometraje: number | null; origen: "compra" | "parte_pago" | "consignacion" | "intermediacion";
   estado: "en_stock" | "reservado" | "vendido" | "retirado"; costo: number; moneda: Moneda;
-  precio_publicado: number | null; dias_en_stock: number; dueno: string | null; monto_acordado: number | null; foto: string | null;
+  precio_publicado: number | null; dias_en_stock: number; dueno: string | null; monto_acordado: number | null; foto: string | null; en_agencia: boolean;
 };
 
 export default async function PaginaStock({
@@ -36,13 +37,17 @@ export default async function PaginaStock({
   let consulta = supabase.from("v_stock").select("*").order("fecha_ingreso", { ascending: false }).limit(500);
   if (ver === "disponibles") consulta = consulta.in("estado", ["en_stock", "reservado"]);
   else if (ver === "terceros") consulta = consulta.in("estado", ["en_stock", "reservado"]).in("origen", ["consignacion", "intermediacion"]);
+  else if (ver === "fuera") consulta = consulta.in("estado", ["en_stock", "reservado"]).eq("en_agencia", false);
   else if (["reservado", "vendido", "retirado"].includes(ver)) consulta = consulta.eq("estado", ver);
 
   const { data } = await consulta;
   // La búsqueda se hace en el servidor sobre los resultados (sin armar filtros con texto del usuario).
   const busqueda = q.trim().toLowerCase().slice(0, 60);
+  // La patente se encuentra con o sin guiones ("abc123" o "abc-123").
+  const sinSignos = (t: string) => t.toLowerCase().replace(/[^a-z0-9]/g, "");
   const filas = ((data ?? []) as Fila[]).filter((b) =>
-    !busqueda || `${b.marca} ${b.modelo} ${b.version ?? ""} ${b.dominio ?? ""} ${b.anio ?? ""}`.toLowerCase().includes(busqueda),
+    !busqueda || `${b.marca} ${b.modelo} ${b.version ?? ""} ${b.dominio ?? ""} ${b.anio ?? ""}`.toLowerCase().includes(busqueda)
+      || (!!b.dominio && sinSignos(busqueda).length >= 3 && sinSignos(b.dominio).includes(sinSignos(busqueda))),
   );
   const fotos = await enlacesFotos(supabase, filas.map((f) => f.foto));
 
@@ -100,6 +105,7 @@ export default async function PaginaStock({
                     <div className="absolute top-3 left-3 flex flex-wrap gap-1.5">
                       <InsigniaEstado estado={b.estado} />
                       {b.origen !== "compra" && <InsigniaOrigen origen={b.origen} />}
+                      {!b.en_agencia && <span className="insignia bg-sky-100 text-sky-800">Fuera de la agencia</span>}
                     </div>
                   </div>
                   <div className="p-4">

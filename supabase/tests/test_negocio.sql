@@ -226,6 +226,112 @@ select pg_temp.esperar_error(format($q$select public.registrar_operacion(jsonb_b
 update public.bienes set costo = 0 where id = :fz;
 select pg_temp.check((select anulado from public.movimientos where bien_id = :fz and automatico), 'costo 0 anula la compra');
 
+-- ================= 5. Correcciones (migración 0010) =================
+-- Caso real: se vendió como propio un auto que era de consignación
+select public.crear_bien('{"tipo":"auto","marca":"Toyota","modelo":"Etios","origen":"compra","costo":"17000000","moneda":"ARS","registrar_egreso":true}') as etios \gset
+select public.registrar_operacion(jsonb_build_object('bien_id', :etios, 'cliente_id', :cli1, 'precio_venta', 20000000, 'moneda', 'ARS',
+  'pagos', jsonb_build_array(jsonb_build_object('tipo','efectivo','monto',20000000)))) as op_mal \gset
+select public.corregir_operacion(:op_mal, jsonb_build_object(
+  'motivo', 'Era consignación',
+  'bien', jsonb_build_object('origen','consignacion','dueno_id',(select id from public.personas where nombre='Dueño Consig'),'monto_acordado',18500000),
+  'operacion', jsonb_build_object('cliente_id', :cli1, 'precio_venta', 20000000, 'moneda', 'ARS',
+     'pagos', jsonb_build_array(jsonb_build_object('tipo','efectivo','monto',20000000))))) as op_bien \gset
+select pg_temp.check((select anulada and corregida_por = :op_bien from public.operaciones where id = :op_mal), 'la original queda anulada y apunta a la nueva');
+select pg_temp.check((select ganancia_neta from public.operaciones where id = :op_bien) = 1500000, 'corregida: gana 1,5M (consignación)');
+select pg_temp.check((select origen = 'consignacion' and estado = 'vendido' and costo = 0 from public.bienes where id = :etios), 'el bien quedó como consignación vendido');
+select pg_temp.check((select count(*) from public.movimientos m join public.motivos_caja mc on mc.id = m.motivo_id
+                      where m.bien_id = :etios and mc.codigo = 'compra_vehiculo' and not m.anulado) = 0, 'la compra mal cargada quedó anulada');
+select pg_temp.check((select count(*) from public.movimientos m join public.motivos_caja mc on mc.id = m.motivo_id
+                      where m.operacion_id = :op_bien and mc.codigo = 'pago_tercero' and m.monto = 18500000) = 1, 'queda pendiente el pago al dueño');
+select pg_temp.check((select estado from public.acuerdos_terceros where bien_id = :etios) = 'vendido', 'acuerdo vendido');
+select pg_temp.esperar_error(format($q$select public.corregir_operacion(%s, '{"operacion":{}}')$q$, :op_mal), 'ya está anulada');
+-- Si la corrección falla, no queda nada a medias
+select pg_temp.esperar_error(format($q$select public.corregir_operacion(%s, jsonb_build_object('operacion', jsonb_build_object('cliente_id', %s,
+  'precio_venta', 20000000, 'moneda', 'ARS', 'pagos', '[]'::jsonb)))$q$, :op_bien, :cli1), 'Tienen que coincidir');
+select pg_temp.check((select not anulada from public.operaciones where id = :op_bien), 'una corrección fallida no anula nada');
+
+-- Cambiar origen en stock: intermediación -> propio, y vuelta
+select public.crear_bien(jsonb_build_object('tipo','auto','marca','Ford','modelo','Ka','origen','intermediacion','en_agencia',false,
+  'dueno_id',(select id from public.personas where nombre='Agenciero'),'monto_acordado',8000,'moneda','USD')) as ka \gset
+select pg_temp.check((select not en_agencia from public.bienes where id = :ka), 'bien fuera de la agencia');
+select public.cambiar_origen_bien(jsonb_build_object('bien_id', :ka, 'origen','compra','costo',7500,'registrar_egreso',true));
+select pg_temp.check((select origen = 'compra' and costo = 7500 and dueno_id is null from public.bienes where id = :ka), 'pasó a propio');
+select pg_temp.check((select count(*) from public.acuerdos_terceros where bien_id = :ka) = 0, 'sin acuerdo');
+select pg_temp.check((select count(*) from public.movimientos where bien_id = :ka and automatico and not anulado) = 1, 'compra registrada');
+
+-- Borrar un bien cargado por error
+select pg_temp.check(public.borrar_bien(:ka) = '{}', 'bien borrado');
+select pg_temp.check((select count(*) from public.bienes where id = :ka) = 0, 'ya no existe');
+select pg_temp.esperar_error(format('select public.borrar_bien(%s)', :etios), 'en stock');
+
+-- Movimiento manual: se edita todo; uno automático no cambia de monto
+insert into public.movimientos (tipo, motivo_id, monto, moneda) values ('egreso', (select id from public.motivos_caja where nombre='Publicidad'), 100, 'ARS') returning id as mman \gset
+update public.movimientos set monto = 150, moneda = 'USD', motivo_id = (select id from public.motivos_caja where nombre='Alquiler') where id = :mman;
+select pg_temp.check((select monto = 150 and moneda = 'USD' from public.movimientos where id = :mman), 'movimiento manual editado');
+select pg_temp.esperar_error(format($q$update public.movimientos set monto = 1 where operacion_id = %s$q$, :op_bien), 'generó el sistema');
+
+-- ================= 6. Revisión de las correcciones (migración 0011) =================
+-- Venta con moto recibida y comisión ya pagada; después se corrige el precio de la comisión no, solo el canal.
+select public.crear_bien('{"tipo":"auto","marca":"Chevrolet","modelo":"Onix","origen":"compra","costo":"8000","moneda":"USD"}') as onix \gset
+select public.registrar_operacion(jsonb_build_object(
+  'bien_id', :onix, 'cliente_id', :cli1, 'precio_venta', 10000, 'moneda', 'USD',
+  'pagos', jsonb_build_array(
+     jsonb_build_object('tipo','efectivo','monto',7000),
+     jsonb_build_object('tipo','bien','monto',3000,'bien', jsonb_build_object('tipo','moto','marca','Honda','modelo','Wave'))),
+  'comisiones', jsonb_build_array(
+     jsonb_build_object('sentido','pagada','persona_id',(select id from public.personas where nombre='Vendedor'),'base','fijo','valor',100)))) as opx \gset
+select bien_recibido_id as wave from public.operacion_pagos where operacion_id = :opx and tipo = 'bien' \gset
+update public.bienes set precio_publicado = 3500, color = 'Rojo' where id = :wave;
+update public.movimientos set pendiente = false
+ where operacion_id = :opx and pendiente and motivo_id = (select id from public.motivos_caja where codigo = 'comision_pagada');
+-- La moto recibida se vende: igual se tiene que poder corregir la venta original
+select public.registrar_operacion(jsonb_build_object(
+  'bien_id', :wave, 'cliente_id', :cli2, 'precio_venta', 3500, 'moneda', 'USD',
+  'pagos', jsonb_build_array(jsonb_build_object('tipo','efectivo','monto',3500)))) as op_wave \gset
+-- No se puede cambiar el valor de un bien recibido que ya se vendió, ni quitarlo de la venta
+select pg_temp.esperar_error(format($q$select public.corregir_operacion(%s, jsonb_build_object('motivo','x','operacion', jsonb_build_object(
+  'cliente_id', %s, 'precio_venta', 10000, 'moneda', 'USD', 'pagos', jsonb_build_array(
+     jsonb_build_object('tipo','efectivo','monto',6000),
+     jsonb_build_object('tipo','bien','monto',4000,'bien_existente_id',%s)))))$q$, :opx, :cli1, :wave), 'ya se vendió');
+select pg_temp.esperar_error(format($q$select public.corregir_operacion(%s, jsonb_build_object('motivo','x','operacion', jsonb_build_object(
+  'cliente_id', %s, 'precio_venta', 10000, 'moneda', 'USD', 'pagos', jsonb_build_array(
+     jsonb_build_object('tipo','efectivo','monto',10000)))))$q$, :opx, :cli1), 'no se puede quitar');
+select pg_temp.check((select not anulada from public.operaciones where id = :opx), 'la corrección fallida no anuló nada');
+-- Corrección válida: pasa a consignación, la moto y la comisión pagada se conservan
+select public.corregir_operacion(:opx, jsonb_build_object('motivo', 'era consignación',
+  'bien', jsonb_build_object('origen','consignacion','dueno_id',(select id from public.personas where nombre='Dueño Consig'),'monto_acordado',9000),
+  'operacion', jsonb_build_object('cliente_id', :cli1, 'precio_venta', 10000, 'moneda', 'USD',
+    'pagos', jsonb_build_array(
+       jsonb_build_object('tipo','efectivo','monto',7000),
+       jsonb_build_object('tipo','bien','monto',3000,'bien_existente_id', :wave)),
+    'comisiones', jsonb_build_array(
+       jsonb_build_object('sentido','pagada','persona_id',(select id from public.personas where nombre='Vendedor'),'base','fijo','valor',100))))) as opx2 \gset
+select pg_temp.check((select bien_recibido_id from public.operacion_pagos where operacion_id = :opx2 and tipo = 'bien') = :wave, 'la moto recibida es la misma');
+select pg_temp.check((select estado = 'vendido' and color = 'Rojo' from public.bienes where id = :wave), 'la moto conserva su estado y sus datos');
+select pg_temp.check((select not anulada from public.operaciones where id = :op_wave), 'la venta de la moto no se tocó');
+select pg_temp.check((select count(*) from public.bienes where marca = 'Honda' and modelo = 'Wave') = 1, 'no se duplicó la moto');
+select pg_temp.check((select not pendiente from public.movimientos
+  where operacion_id = :opx2 and motivo_id = (select id from public.motivos_caja where codigo = 'comision_pagada')), 'la comisión pagada sigue pagada');
+select pg_temp.check((select pendiente and monto = 9000 from public.movimientos
+  where operacion_id = :opx2 and motivo_id = (select id from public.motivos_caja where codigo = 'pago_tercero')), 'el pago al dueño queda pendiente');
+select pg_temp.check((select ganancia_neta from public.operaciones where id = :opx2) = 900, 'gana 900 tras corregir');
+-- El historial conserva el origen que tenía cada versión
+select pg_temp.check((select tipo_operacion from public.v_operaciones where id = :opx) = 'compra', 'la original figura como propia');
+select pg_temp.check((select tipo_operacion from public.v_operaciones where id = :opx2) = 'consignacion', 'la corregida figura como consignación');
+-- Un bien ajeno no se puede colar como "ya recibido"
+select pg_temp.esperar_error(format($q$select public.registrar_operacion(jsonb_build_object('bien_id', %s, 'cliente_id', %s,
+  'precio_venta', 100, 'moneda', 'USD', 'pagos', jsonb_build_array(jsonb_build_object('tipo','bien','monto',100,'bien_existente_id',%s))))$q$, :fz, :cli1, :wave), 'no corresponde a esta venta');
+-- Cambiar entre consignación e intermediación conserva la comisión pactada
+select public.crear_bien(jsonb_build_object('tipo','auto','marca','Kia','modelo','Rio','origen','consignacion',
+  'dueno_id',(select id from public.personas where nombre='Dueño Consig'),'monto_acordado',5000,'moneda','USD','comision_base','pct_precio','comision_valor',5)) as rio \gset
+select public.cambiar_origen_bien(jsonb_build_object('bien_id', :rio, 'origen','intermediacion',
+  'dueno_id',(select id from public.personas where nombre='Agenciero'),'monto_acordado',5200));
+select pg_temp.check((select tipo = 'intermediacion' and monto_acordado = 5200 and comision_valor = 5 from public.acuerdos_terceros where bien_id = :rio), 'acuerdo conserva la comisión');
+-- Los motivos del sistema no sirven para movimientos manuales
+select pg_temp.esperar_error($q$insert into public.movimientos (tipo, motivo_id, monto) values ('ingreso', (select id from public.motivos_caja where codigo='cobro_venta'), 10)$q$, 'lo usa el sistema');
+select pg_temp.esperar_error(format($q$update public.movimientos set motivo_id = (select id from public.motivos_caja where codigo='comision_pagada') where id = %s$q$, :mman), 'lo usa el sistema');
+select pg_temp.esperar_error(format($q$update public.movimientos set bien_id = %s where id = %s$q$, :fz, :mman), 'permission denied');
+
 -- Auditoría registrada
 select pg_temp.check((select count(*) from public.auditoria) > 20, 'auditoría registrada');
 
