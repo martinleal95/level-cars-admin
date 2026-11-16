@@ -35,6 +35,8 @@ const esquemaNuevo = z
     medio: z.enum(["efectivo", "banco"]).default("efectivo"),
     fecha_ingreso: fechaISO,
     dueno_id: idOpcional,
+    dueno_nuevo_nombre: textoOpcional(120),
+    dueno_nuevo_telefono: textoOpcional(40),
     monto_acordado: montoOpcional,
     comision_base: z.preprocess((v) => (v === "" ? null : v), base.nullable().optional()),
     comision_valor: montoOpcional,
@@ -43,7 +45,7 @@ const esquemaNuevo = z
   })
   .superRefine((d, ctx) => {
     if (d.origen !== "compra") {
-      if (!d.dueno_id) ctx.addIssue({ code: "custom", message: "Elegí el dueño del bien" });
+      if (!d.dueno_id && !d.dueno_nuevo_nombre) ctx.addIssue({ code: "custom", message: "Elegí el dueño del bien" });
       if (d.monto_acordado == null) ctx.addIssue({ code: "custom", message: "Indicá el monto acordado con el dueño" });
     }
     if (d.comision_base && d.comision_base !== "fijo" && (d.comision_valor ?? 0) > 100) {
@@ -56,7 +58,21 @@ export async function crearBien(_: Resultado | null, fd: FormData): Promise<Resu
   const d = esquemaNuevo.safeParse(datosFormulario(fd));
   if (!d.success) return { ok: false, error: erroresZod(d.error) };
 
-  const { data, error } = await supabase.rpc("crear_bien", { p: d.data });
+  const { dueno_nuevo_nombre, dueno_nuevo_telefono, ...resto } = d.data;
+  // Si se registra a la persona en el mismo paso, se crea primero y se usa como dueño.
+  if (resto.origen !== "compra" && !resto.dueno_id && dueno_nuevo_nombre) {
+    const { data: persona, error: errPersona } = await supabase.from("personas")
+      .insert({
+        nombre: dueno_nuevo_nombre, telefono: dueno_nuevo_telefono ?? null,
+        es_dueno: resto.origen === "consignacion", es_agenciero: resto.origen === "intermediacion",
+      })
+      .select("id").single();
+    if (errPersona) return { ok: false, error: mensajeError(errPersona) };
+    resto.dueno_id = persona.id;
+    revalidatePath("/personas");
+  }
+
+  const { data, error } = await supabase.rpc("crear_bien", { p: resto });
   if (error) return { ok: false, error: mensajeError(error) };
 
   // Las fotos van después de crear el bien; si alguna falla, el bien igual queda

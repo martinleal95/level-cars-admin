@@ -25,6 +25,7 @@ export function FormularioBien({ personas, hoy, vender = false }: { personas: Pe
   const [origen, setOrigen] = useState<(typeof ORIGENES)[number]["valor"]>(vender ? "intermediacion" : "compra");
   const [enAgencia, setEnAgencia] = useState(!vender);
   const terceros = origen !== "compra";
+  const [personaNueva, setPersonaNueva] = useState(false);
 
   return (
     <Formulario accion={crearBien} className="space-y-6">
@@ -134,13 +135,30 @@ export function FormularioBien({ personas, hoy, vender = false }: { personas: Pe
           <p className="text-lg font-bold sm:col-span-2 lg:col-span-3">
             Acuerdo con el {origen === "consignacion" ? "dueño" : "agenciero"}
           </p>
-          <Campo etiqueta={origen === "consignacion" ? "Dueño" : "Agenciero"} htmlFor="dueno_id"
-            ayuda={personas.length ? undefined : "Primero cargalo en Personas."}>
-            <select id="dueno_id" name="dueno_id" className="campo" required defaultValue="">
-              <option value="" disabled>Elegí una persona</option>
-              {personas.map((p) => <option key={p.id} value={p.id}>{p.nombre}</option>)}
-            </select>
-          </Campo>
+          {!personaNueva ? (
+            <Campo etiqueta={origen === "consignacion" ? "Dueño" : "Agenciero"} htmlFor="dueno_id"
+              ayuda={personas.length ? undefined : "Todavía no hay personas: registrá una nueva."}>
+              <select id="dueno_id" name="dueno_id" className="campo" required defaultValue="">
+                <option value="" disabled>Elegí una persona</option>
+                {personas.map((p) => <option key={p.id} value={p.id}>{p.nombre}</option>)}
+              </select>
+              <button type="button" onClick={() => setPersonaNueva(true)} className="mt-2 text-sm font-semibold text-naranja-600 hover:underline">
+                + Registrar una persona nueva
+              </button>
+            </Campo>
+          ) : (
+            <>
+              <Campo etiqueta={`Nombre del ${origen === "consignacion" ? "dueño" : "agenciero"}`} htmlFor="dueno_nuevo_nombre">
+                <input id="dueno_nuevo_nombre" name="dueno_nuevo_nombre" className="campo" required maxLength={120} autoComplete="off" />
+              </Campo>
+              <Campo etiqueta="Teléfono o contacto" htmlFor="dueno_nuevo_telefono">
+                <input id="dueno_nuevo_telefono" name="dueno_nuevo_telefono" className="campo" maxLength={40} inputMode="tel" autoComplete="off" />
+                <button type="button" onClick={() => setPersonaNueva(false)} className="mt-2 text-sm font-semibold text-acero-600 hover:underline">
+                  Elegir una persona ya registrada
+                </button>
+              </Campo>
+            </>
+          )}
           <Campo etiqueta="Monto que espera recibir" htmlFor="monto_acordado"
             ayuda="Lo que se le paga al dueño cuando se vende.">
             <EntradaImporte id="monto_acordado" name="monto_acordado" required className="campo cifra" />
